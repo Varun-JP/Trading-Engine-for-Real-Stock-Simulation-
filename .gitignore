@@ -5,3 +5,10 @@ node_modules/
 MongoDB/
 
 k8s/secret.yaml
+.vercel
+
+# Infrastructure & Leak Prevention
+k8s/
+*.yaml
+*.zip
+.vercel/
