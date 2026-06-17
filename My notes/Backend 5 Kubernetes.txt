@@ -1,0 +1,75 @@
+Now that you have all the configuration files perfectly tuned and the resource limits hard-capped, launching your entire distributed system next time will be incredibly smooth. You won't have to deal with any of the frantic debugging or RAM crashes we just solved.
+
+Here is your exact, step-by-step playbook for spinning up the cluster under normal conditions.
+
+---
+
+### ⏱️ The Normal Startup Playbook
+
+#### Step 1: Fire up the Engine Room
+
+Open Docker Desktop and give it about 60 seconds to fully initialize its background Kubernetes node.
+
+#### Step 2: Boot the Infrastructure Core (The State & Event Layers)
+
+Open your terminal, navigate to your project directory, and head into your Kubernetes folder. We deploy the backbone components **first** so they are ready to accept connections:
+
+```powershell
+cd k8s
+
+# 1. Bring up your Shared Configurations & Core State
+kubectl apply -f secret.yaml
+kubectl apply -f redis.yaml
+kubectl apply -f zookeeper.yaml
+
+# 2. Fire up Kafka (Give it about 10–15 seconds right after Zookeeper)
+kubectl apply -f kafka.yaml
+
+```
+
+#### Step 3: Launch the Application Tier
+
+Once Redis and Kafka are sitting comfortably in a `Running` state, unleash your microservices. Because we optimized the `wait-for-kafka` initialization containers earlier, they will cleanly wait for the pipe to clear before starting their engines:
+
+```powershell
+kubectl apply -f engine.yaml
+kubectl apply -f chart-engine.yaml
+kubectl apply -f server.yaml
+kubectl apply -f simulator.yaml
+
+```
+
+#### Step 4: Track the Launch
+
+Watch the pods mobilize until the entire dashboard reads a beautiful, uniform green:
+
+```powershell
+kubectl get pods -w
+
+```
+
+*(Once everything displays `1/1 Running`, slap `Ctrl + C` to break out of the watch window).*
+
+#### Step 5: Plug in the Tunnel & Go Live
+
+Open up the communication link to your local browser environment:
+
+```powershell
+kubectl port-forward deployment/nexus-server 5000:5000
+
+```
+
+Open up your browser, head to your UI portal, and watch the matching engine fire up seamlessly!
+
+---
+
+### 🛑 The Pro-Tip Clean Teardown
+
+When you are done testing and want to instantly reclaim your system's memory for gaming, browsing, or other development tasks without deleting your setup, run this single command from your `k8s` folder:
+
+```powershell
+kubectl delete -f .
+
+```
+
+This cleanly wipes all deployments, stateful pods, and networking configurations out of the local cluster's active memory in one swoop. Then you can just close Docker Desktop, and your RAM will drop right back down to zero usage. Let me know if you need help turning this startup sequence into a single-click script!

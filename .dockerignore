@@ -1,0 +1,7 @@
+node_modules
+*.txt
+.env
+pics
+MongoDB
+.qodo
+template.code

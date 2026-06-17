@@ -1,0 +1,197 @@
+import express from 'express';
+import { Kafka } from 'kafkajs';
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+import http from 'http'; //Native Node HTTP module 
+import { Server } from 'socket.io';
+import { User , HistoricalTrade } from './model.js';
+import connectDB from './db.js';
+import { createClient } from 'redis';
+
+
+//Load environment variables from .env file
+dotenv.config();
+
+const app = express();
+const PORT = 5000;
+
+//Create the unified HTTP server wrapper around Express
+const server = http.createServer(app);
+
+//Initialize Socket.io server layer on top of our HTTP server 
+const io = new Server( server , {
+    cors : { origin : "*"}  // Protects and allows frontends to listen securely 
+});
+
+io.use(async (socket , next) => {
+    const apiKey = socket.handshake.auth.token;
+    if(!apiKey) return next(new Error('API key missing'));
+
+    const user = await User.findOne({ apiKey });
+    if(!user ) return next(new Error('Invalid API key'));
+
+    socket.userId = user._id.toString();
+    socket.join(socket.userId);
+    next();
+});
+
+app.use(express.json());
+
+//Tell Express to automatically serve files inside the 'public' folder
+
+app.use(express.static('public'));
+
+// 1 . INITIALIZE KAFKA CLIENT 
+// connects to the external port we exposed in our docker - compose file 
+
+
+const kafka = new Kafka({
+    clientId : 'financial-app',     //name of the backend server that is connecting to kafka cluster 
+    brokers : ['localhost:9092'] // this is the default port for kafka broker
+});
+
+const producer = kafka.producer();
+const consumer = kafka.consumer({ groupId : 'analytics-group '});
+
+
+
+const redisClient  = createClient({
+    url : process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+redisClient.on('error' , (err) => console.error('redis Client Error',err));
+//2 . START SERVICES (MONGO -> KAFKA -> EXPRESS)
+const startServices = async() => {
+    try{
+        
+        //Connect to DB via our Es module power switch
+        await connectDB(); //instead of mongoose connect()
+        await redisClient.connect();
+        console.log('Redis Connected Successfully');
+        await producer.connect();  //to wait for the connection to establish before moving to the next line of code 
+        await consumer.connect(); //else we might get a consumer not connected error if we try to subscribe before the connection is ready
+        console.log("Kafka Producer and Consumer Connected successfully"); 
+
+        //subscribe our consumer to the 'trade - ticks' topic
+        await consumer.subscribe({ topic : 'order-requests' , fromBeginning : true});
+
+        //start the  background Consumer loop
+        await consumer.run({
+            eachMessage : async({ topic , partition , message}) => {
+                // Parse the binary buffer back into usable JSON string data
+                const tick = JSON.parse(message.value.toString());
+                console.log(`\n Real Kafka Consumer : [PROCESSING ISOLATED USER EVENT]`);
+                console.log(`Ticker : ${tick.ticker} | Price rs${tick.price} | Side ${tick.side} | Qty ${tick.quantity}`);
+
+                try{
+                    //C. Save the structured trade transaction permanently to MongoDB Altas
+                    const newTrade = new HistoricalTrade({
+                        userId : tick.userId, // Enforces account isolation 
+                        ticker : tick.ticker,
+                        price : tick.price,
+                        quantity : tick.quantity, //Added from model.js definition
+                        side : tick.side
+                    });
+
+                    await newTrade.save();
+                    console.log(`Saved transaction securely to User account: ${tick.userId}`);
+                    
+                    //B . WEBS SOCKET BROADCAST : Shoot the live data straight to the browser tab
+                    io.to(tick.userId.toString()).emit('live-ticker-update' , {
+                        ticker:tick.ticker,
+                        price: tick.price,
+                        side:tick.side,
+                        timestamp : new Date()
+                    });
+
+                }
+                catch(dbError){
+                    console.error("Failed to save tick or BroadCast" , dbError.message);
+                }
+            } ,
+        }); 
+//CRUCIAL : Listen using the 'server' instance wrapper , not 'app.listen'
+        server.listen(PORT , () => {
+            console.log(`INGESTION SERVER & UI PORTAL LIVE ON http://localhost:${PORT}`);
+        });
+
+    } catch(error){
+    console.error("Critical Service Initialization Error" , error);
+    process.exit(1);
+    }
+};
+
+// 3 . THE INGESTION ROUTE (The producer)
+
+app.post('/api/ticker' , async(req , res) => {
+    try {
+        const apiKey = req.headers['x-api-key'];
+        if(!apiKey) return res.status(401).json({ success : false , error : "API key missing"});
+
+        const user = await User.findOne({ apiKey });
+        if(!user) return res.status(403).json({ success : false , error : "Invalid API key"});
+
+        const tradeTick = { ...req.body , userId : user._id }
+
+        //send the payload straight onto the real Kafka conveyor belt
+        await producer.send({  //implictly converts the string into a binary buffer and sends it to the broker
+            topic : 'order-requests', 
+            messages : [
+                {value : JSON.stringify(tradeTick)}
+            ],
+        });
+        //Instantly tell Thunder Client we queued the data safely 
+        return res.status(202).json({
+            success : true ,
+            message : "Trade tick successfully broadcasted to Kafka"
+        });
+    }
+    catch(error){
+        console.error("Kafka Producer Error" , error);
+        return res.status(500).json({success : false , error : error.message});
+
+    }
+});
+
+// Fire up the start sequence
+startServices().catch(console.error);
+
+
+
+    /*
+    whats native node http module supposed to be ? 
+    what does that mean ? const server = http.createServer(app); its connecting to https ? directly to the protocol system? 
+
+    socket io is used for unout out yes . but whats that  ? input output streams ? annd we make a new server from that ? any alternatives f doing that ? 
+    we are just doing that for live data and therefore we use the http to connect directly using the protocol itself yes ? 
+
+    regarding CORS (Cross-Origin Resource Sharing).
+     The backend server actually receives the request, processes it, and sends the data back.However, it attaches a label saying "I only allow frontend-abc.com".The browser reads that label. If the user is currently sitting on evil-website.net, the browser steps in and hides the data from the website.
+
+    CORS is enforced by the browser, not the backend server itself.
+
+
+    so we are allowing the socket io to cors and we arent adding any sites because we haven't yet deployed the frontend on a domain yes ? 
+
+
+    app.use(express.static('public')) ; so data in the folder public . but why the keyword static is used here ? 
+
+    we are doing the connectDB() instead of mongoose.connect() ? why is that ?
+    
+    we add io emit to be almost the same as our newTrade? why is that ?  jus tto show that on the front end part ? 
+    
+    starting user authorization 
+
+        ok so we are keeping the const apiKey because we are using it everywhere and dont want to confuse ourselves right ? 
+
+        what is req headers  ? is x api key just a place holder ? 
+
+        we are finally changing const Tradetick from just req. body to ... req.body . what does that difference indicate ? 
+
+        io.emit is for broadcast and io.to is for specific ? 
+
+
+        socket.handshake.auth.token;??
+        */
+
+

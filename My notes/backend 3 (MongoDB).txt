@@ -1,0 +1,31 @@
+ npm install mongoose dotenv
+
+const connectDB = async () => {
+    try{
+        //This pulls the exact string we jsut saved in your .env file
+        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        console.log(`MongoDB connected successflly : ${conn.connection.host}`);
+    }
+    catch(error){
+        console.error(`Database connection failed : ${error.message}`);
+        process.exit(1);
+    }
+};
+
+module.exports = connectDB;
+
+
+/*
+process.env.MONGODB_URI a keyword ? 
+connection host ? 
+error message ? 
+module exports ? we are forwarding an instance to export?
+
+*/
+
+3. What is user._id? Why the underscore?
+In MongoDB, every document automatically gets a completely unique identification code when it's created. MongoDB enforces a strict naming convention: this primary key is always named _id with a leading underscore.
+
+What it is: It is not a function; it is a BSON ObjectType Property.
+
+Why .toString() is used: Because MongoDB stores _id as a complex, raw binary buffer object, we run .toString() on it to flatten it into a clean text string ("65b2c...") before shipping it off to Kafka.

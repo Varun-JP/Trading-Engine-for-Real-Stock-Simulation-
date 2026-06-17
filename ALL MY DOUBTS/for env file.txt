@@ -1,0 +1,26 @@
+1. What is mongodb+srv? (Not src)
+The standard connection protocol is just mongodb://, which means "connect directly to this specific server IP address." The +srv part stands for Service Record. It tells your Mongoose client:
+
+"Don't look for a single server. Go check the DNS (Domain Name System) records of MongoDB Atlas. They will return a dynamic list of multiple database servers (a replica set) currently running in the cloud."
+
+It allows MongoDB to seamlessly route your connection to a healthy database server if one of their cloud machines crashes.
+
+.../financial_db?retryWrites=true&w=majority&appName=Cluster0
+1. retryWrites=true
+This is an automatic fallback mechanism. If your backend tries to write a trade to MongoDB Atlas, and a cloud network glitch happens at that exact millisecond, Mongoose won't crash your server or throw an immediate error. It will automatically try to execute that write request a second time behind the scenes.
+
+2. w=majority (The Write Concern)
+This relates to how distributed clusters handle data security. MongoDB Atlas doesn’t just run one database server; it replicates your data across at least three separate cloud servers to prevent data loss.
+
+w=majority means: "When I send a trade tick, don't return a success response to my backend until at least a majority (2 out of 3) of your cloud servers have safely saved it to their disks." ### 3. appName=Cluster0
+This is simply a metadata tag used for debugging. If you log into your MongoDB cloud dashboard to view performance charts, you can filter your connection logs by application name to identify exactly which backend app sent those queries.
+
+One Critical Operational Reminder
+In your console logs, your environment injection tool printed a warning:
+
+Plaintext
+◇ injected env (1) from .env // tip: ⌘ override existing { override: true }
+When you transition to using Prisma later, Prisma automatically looks for an environment variable named exactly DATABASE_URL. If you ever change or rename your .env file keys, your libraries won't know where to look. Keeping variable keys standard and localized in this single file is the key to managing a clean architecture.
+
+
+The Difference: w=majority vs w=1SettingHow It WorksThe Risk / Benefitw=majority (Current)Your backend waits until the main database server AND at least one backup server confirm they have saved the trade to disk.High Security: If the main server explodes a millisecond later, your backup has the data. No trades are ever lost.w=1 (Less Secure)Your backend gets a "Success" response the instant the single main database server acknowledges the write, without waiting for the backups.Ultra-Fast Speed: The network round-trip is much quicker, but if that main server crashes before replicating, that trade data vanishes forever.

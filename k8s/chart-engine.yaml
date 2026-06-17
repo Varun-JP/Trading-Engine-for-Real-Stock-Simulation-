@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-chart-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus-chart-engine
+  template:
+    metadata:
+      labels:
+        app: nexus-chart-engine
+    spec:
+      initContainers:
+      - name: wait-for-kafka
+        image: busybox
+        command: ['sh', '-c', 'until nc -z kafka 9092; do echo waiting for kafka; sleep 5; done']
+      containers:
+      - name: nexus-chart-engine
+        image: varun123jjsdj/nexus-chart-engine:latest
+        command: ["node", "chartEngine.js"]
+        env:
+        - name: KAFKA_BROKERS
+          value: "kafka:9092"
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        envFrom:
+        - secretRef:
+            name: nexus-secret

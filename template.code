@@ -1,0 +1,42 @@
+import express from 'express';
+
+const app = express();
+const PORT = 5000;
+
+//MIDDLEWARE : This tells Express to automatically parse incoming raw data packets into a clean JavaScript object we can read.
+app.use(express.json());
+
+app.post('/api/telemetry', (req,res) => { 
+// req.body contains the incoming JSON data packet 
+const data = req.body;
+
+//for now , we just print the data directly to our terminal screen
+
+console.log("message one" , data);
+//we send a fast 200 Ok success response back to close the network connectio quickly 
+return res.status(200).json({
+    success: true ,
+    messsage : "Data packet ingested successfully."
+});
+
+});
+
+//START : Tell the server to start listening on PORT 500
+app.listen(PORT , () => {
+    console.log('INGESTION SERVER IS LIVE ON http://localhost:${PORT}');
+});
+
+
+    //what's this ? but what is the api telemetry thingy? It's a route that the client will use to send data to the server.
+    /*so a pre determined route ?  
+    are req , res kewords for request and response ?
+    is the port only supposed to be 500 ? 
+    post , use get , post , put , delete , patch , options , head , connect , trace , etc. for express ? 
+    req,body is the data that the client sends to the server ?
+    console is what we use to print the data to the terminal screen ?
+    response status is it ? why are we sending 200 ? because of the standard HTML codes  ? 
+    and why success true ? is it a condition ? or a flag ? or what ? 
+    like if yes then send this message back ? 
+    
+    
+    */

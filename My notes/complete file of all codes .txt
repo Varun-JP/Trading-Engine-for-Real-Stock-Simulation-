@@ -1,0 +1,1034 @@
+env "MONGODB_URI=mongodb+srv://varunjayprakash27_db_user:GocjGUCESaF3FGsq@cluster0.zsbvll0.mongodb.net/financial_db?retryWrites=true&w=majority&appName=Cluster0
+"
+
+simulator js "import { Worker } from 'worker_threads';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+// 4 workers × 125 bots = 500 intelligent bots
+// Each worker has all 4 personalities: market makers, noise traders, whales, contrarians
+const WORKER_COUNT = 1; //4 for more bots
+console.log(`[SIMULATOR] Each worker runs: market makers, noise traders, whales, contrarians`);
+console.log(`[SIMULATOR] Direct Kafka publish — circuit breakers + capital limits active\n`);
+
+for (let i = 0; i < WORKER_COUNT; i++) {
+    const worker = new Worker(path.join(__dirname, 'botWorker.js'), {
+        workerData: {
+            workerId:     i + 1,
+            kafkaBrokers: process.env.KAFKA_BROKERS || 'localhost:9092',
+        }
+    });
+
+    worker.on('message', (msg) => {
+        if (msg.type === 'log') console.log(msg.data);
+    });
+
+    worker.on('error', (err) => {
+        console.error(`❌ Worker ${i + 1} error:`, err.message);
+    });
+
+    worker.on('exit', (code) => {
+        if (code !== 0) console.error(`🛑 Worker ${i + 1} exited with code ${code}`);
+    });
+}"
+
+docker file "# Use official Node.js LTS image on Alpine (small + fast)
+FROM node:20-alpine
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Copy package files first (Docker layer caching — only re-installs if these change)
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm install --omit=dev
+
+# Copy the rest of your source code
+COPY . .
+
+# Default port your server listens on
+EXPOSE 5000
+
+# Default command — overridden per-service in docker-compose.yaml
+CMD ["node", "server.js"]"
+
+"services:
+
+  # ── INFRASTRUCTURE ────────────────────────────────────────────────────────────
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    user: root
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    user: root
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  redis:
+    image: redis:7-alpine
+    container_name: trading_redis
+    ports:
+      - "6379:6379"
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── YOUR APP SERVICES ─────────────────────────────────────────────────────────
+
+  server:
+    build: .
+    container_name: nexus-server
+    command: node server.js
+    ports:
+      - "5000:5000"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+    restart: on-failure
+
+  engine:
+    build: .
+    container_name: nexus-engine
+    command: node engine.js
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+    restart: on-failure
+
+  chart-engine:
+    build: .
+    container_name: nexus-chart-engine
+    command: node chartEngine.js
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+    restart: on-failure
+
+  simulator:
+    build: .
+    container_name: nexus-simulator
+    command: node simulator.js
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      KAFKA_BROKERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+    restart: on-failure
+
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:"
+
+server js "import express from 'express';
+import { Kafka } from 'kafkajs';
+import dotenv from 'dotenv';
+import http from 'http';
+import { Server } from 'socket.io';
+import { User, Candle } from './model.js';
+import connectDB from './db.js';
+import client from 'prom-client';
+
+dotenv.config();
+
+const app    = express();
+const PORT   = 5000;
+const server = http.createServer(app);
+
+// ----- SOCKET.IO ---------------------------
+const io = new Server(server, {
+    cors: { origin: '*' }
+});
+
+//-----------PROMETHEUS-----------------------
+export const circuitBreakerCounter = new client.Counter({
+    name : 'nexus_circuit_breaker_trips_total',
+    help : 'Number of times circuit breaker has tripped',
+    labelNames : ['ticker', 'side']
+});
+io.use(async (socket, next) => {
+    try {
+        const apiKey = socket.handshake.auth.token;
+        if (!apiKey) return next(new Error('API key missing'));
+
+        const user = await User.findOne({ apiKey });
+        if (!user)  return next(new Error('Invalid API key'));
+
+        socket.userId = user._id.toString();
+        socket.join(socket.userId);
+        next();
+    } catch (err) {
+        console.error('Socket auth middleware error', err.message);
+        next(new Error('Authentication error'));
+    }
+});
+
+app.use(express.json());
+app.use(express.static('public'));
+
+// ── KAFKA ─────────────────────────────────────────────────────────────────────
+const kafka = new Kafka({
+    clientId: 'api-server',
+    brokers: [process.env.KAFKA_BROKERS || 'kafka:9092']
+});
+
+const producer       = kafka.producer();
+
+// Consumes trade-fills FROM engine.js → emits Socket.io events to users
+const fillConsumer   = kafka.consumer({ groupId: 'fill-broadcast-group' });
+
+// Consumes candle updates FROM chartEngine.js → streams to browsers
+const candleConsumer = kafka.consumer({ groupId: 'candle-broadcast-group' });
+
+// ── CIRCUIT BREAKER ───────────────────────────────────────────────────────────
+const CIRCUIT_STATE = {
+    INFY:     { dailyOpen: null, haltUntil: null },
+    RELIANCE: { dailyOpen: null, haltUntil: null },
+    TCS:      { dailyOpen: null, haltUntil: null },
+    HDFCBANK: { dailyOpen: null, haltUntil: null },
+};
+
+const CIRCUIT_LIMIT_PCT = 0.15;
+const HALT_DURATION_MS  = 10_000;
+
+function enforceCircuitBreaker(ticker, price) {
+    const state = CIRCUIT_STATE[ticker];
+    if (!state) return null;
+
+    if (state.dailyOpen === null) { state.dailyOpen = price; return null; }
+
+    if (state.haltUntil && Date.now() < state.haltUntil) {
+        const resumesIn = Math.ceil((state.haltUntil - Date.now()) / 1000);
+        return `Circuit breaker active — ${ticker} trading halted for ${resumesIn}s`;
+    }
+
+    if (state.haltUntil && Date.now() >= state.haltUntil) {
+        state.haltUntil = null;
+        state.dailyOpen = price;
+    }
+
+    const move = Math.abs(price - state.dailyOpen) / state.dailyOpen;
+    if (move >= CIRCUIT_LIMIT_PCT) {
+        state.haltUntil = Date.now() + HALT_DURATION_MS;
+        const dir = price > state.dailyOpen ? 'UPPER' : 'LOWER';
+        console.warn(`[CIRCUIT] 🚨 ${dir} BREAKER — ${ticker} halted (${(move * 100).toFixed(1)}%)`);
+        circuitBreakerCounter.inc({ticker , side : dir});
+        return `Circuit breaker triggered — ${ticker} ${dir} limit breached. Trading halted 10s.`;
+    }
+
+    return null;
+}
+
+// ── START ─────────────────────────────────────────────────────────────────────
+const startServices = async () => {
+    try {
+        await connectDB();
+        console.log('[SERVER] ✅  MongoDB connected');
+
+        await producer.connect();
+        await fillConsumer.connect();
+        await candleConsumer.connect();
+        console.log('[SERVER] ✅  Kafka connected');
+
+        // ── Listen for trade fills from engine.js → push to user sockets ──
+        await fillConsumer.subscribe({ topic: 'trade-fills', fromBeginning: false });
+        await fillConsumer.run({
+            eachMessage: async ({ message }) => {
+                try {
+                    const { buyerUserId, sellerUserId, ticker, price,quantity, timestamp } = JSON.parse(message.value.toString());
+           // FIXED (broadcast to everyone - sidebar will light up)
+                        io.emit('live-ticker-update', { ticker, price, quantity, side: 'BUY',  timestamp });
+                        io.emit('live-ticker-update', { ticker, price, quantity, side: 'SELL', timestamp });    
+                } catch (err) {
+                    console.error('[SERVER] Fill broadcast error:', err.message);
+                }
+            }
+        });
+
+        // ── Listen for candle updates from chartEngine.js → push to all browsers ──
+        await candleConsumer.subscribe({ topic: 'candle-updates', fromBeginning: false });
+        await candleConsumer.run({
+            eachMessage: async ({ message }) => {
+                try {
+                    const candleData = JSON.parse(message.value.toString());
+                    io.emit('live-candle-update', candleData);
+                } catch (err) {
+                    console.error('[SERVER] Candle broadcast error:', err.message);
+                }
+            }
+        });
+
+        server.listen(PORT, () => {
+            console.log(`[SERVER] 🚀  API + UI live on http://localhost:${PORT}`);
+        });
+
+    } catch (err) {
+        console.error('[SERVER] Critical startup failure:', err);
+        process.exit(1);
+    }
+};
+
+// ── ROUTES ────────────────────────────────────────────────────────────────────
+app.get('/api/candles/:ticker', async (req, res) => {
+    try {
+        const ticker = req.params.ticker.toUpperCase();
+        const supported = ['INFY', 'RELIANCE', 'TCS', 'HDFCBANK'];
+        if (!supported.includes(ticker)) {
+            return res.status(404).json({ success: false, error: `${ticker} is not tracked` });
+        }
+
+        const historicalCandles = await Candle.find({ ticker })
+            .sort({ timestamp: 1 })
+            .limit(200)
+            .lean();
+
+        return res.status(200).json({
+            success: true, ticker,
+            count: historicalCandles.length,
+            data:  historicalCandles
+        });
+    } catch (err) {
+        console.error('[SERVER] Candle fetch error:', err.message);
+        return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+app.get('/metrics' , async(req , res) => {
+    try{
+        res.setHeader('Content-Type' , client.register.contentType);
+        res.send(await client.register.metrics());
+    }
+    catch(err){
+        res.status(500).send(err);
+    }
+});
+app.post('/api/orders', async (req, res) => {
+    try {
+        const apiKey = req.headers['x-api-key'];
+        if (!apiKey) return res.status(401).json({ success: false, error: 'API key missing' });
+
+        const user = await User.findOne({ apiKey });
+        if (!user)  return res.status(403).json({ success: false, error: 'Invalid API key' });
+
+        const { ticker, price, quantity, side } = req.body;
+
+        if (!ticker || !side || price === undefined || quantity === undefined) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+
+        const parsedSide     = side.toUpperCase();
+        const parsedPrice    = parseFloat(price);
+        const parsedQuantity = parseInt(quantity);
+
+        if (parsedSide !== 'BUY' && parsedSide !== 'SELL') {
+            return res.status(400).json({ success: false, error: "Side must be 'BUY' or 'SELL'" });
+        }
+        if (isNaN(parsedPrice)    || parsedPrice    <= 0) return res.status(400).json({ success: false, error: 'Invalid price' });
+        if (isNaN(parsedQuantity) || parsedQuantity <= 0) return res.status(400).json({ success: false, error: 'Invalid quantity' });
+
+        const circuitError = enforceCircuitBreaker(ticker.toUpperCase(), parsedPrice);
+        if (circuitError) return res.status(503).json({ success: false, error: circuitError });
+
+        const orderId = `ord_${Math.random().toString(36).substring(2, 9)}`;
+
+        await producer.send({
+            topic: 'order-requests',
+            messages: [{
+                key:   ticker.toUpperCase(),
+                value: JSON.stringify({
+                    orderId,
+                    userId:    user._id.toString(),
+                    ticker:    ticker.toUpperCase(),
+                    side:      parsedSide,
+                    price:     parsedPrice,
+                    quantity:  parsedQuantity,
+                    timestamp: new Date().toISOString()
+                })
+            }]
+        });
+
+        return res.status(202).json({ success: true, message: 'Order dispatched to Kafka', orderId });
+
+    } catch (err) {
+        console.error('[SERVER] Order ingestion error:', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+startServices().catch(console.error);
+
+
+/*
+whats next actually ? i see it in 3 different places and each time it looks to have a different function
+why are someplaces the number is given as 1000 and someplaces its 10_000 ? jsut conventions? 
+
+ciel ? 
+
+req.params.ticker ? 
+
+
+
+
+*/"
+botworker "import { parentPort, workerData } from 'worker_threads';
+import { Kafka } from 'kafkajs';
+import { randomUUID } from 'crypto';
+
+const { workerId, kafkaBrokers } = workerData;
+
+const kafka = new Kafka({
+    clientId: `bot-worker-${workerId}`,
+    brokers:  [kafkaBrokers],
+    logLevel: 0
+});
+
+const producer = kafka.producer();
+const TICKERS  = ['INFY', 'RELIANCE', 'TCS', 'HDFCBANK'];
+
+// ── MARKET STATE (per worker — independent drift, converges via Redis) ────────
+const MARKET_STATE = {
+    INFY:     { lastPrice: 1500.00, dailyOpen: 1500.00, haltUntil: null },
+    RELIANCE: { lastPrice: 2400.00, dailyOpen: 2400.00, haltUntil: null },
+    TCS:      { lastPrice: 3200.00, dailyOpen: 3200.00, haltUntil: null },
+    HDFCBANK: { lastPrice: 4000.00, dailyOpen: 4000.00, haltUntil: null },
+};
+
+const CIRCUIT_LIMIT    = 0.15;
+const HALT_DURATION_MS = 10_000;
+
+function isHalted(ticker) {
+    const state = MARKET_STATE[ticker];
+    if (!state.haltUntil) return false;
+    if (Date.now() < state.haltUntil) return true;
+    state.haltUntil = null;
+    state.dailyOpen = state.lastPrice;
+    log(`[CIRCUIT] ✅  ${ticker} halt lifted. New open: ₹${state.dailyOpen.toFixed(2)}`);
+    return false;
+}
+
+function checkCircuit(ticker, price) {
+    const { dailyOpen } = MARKET_STATE[ticker];
+    const move = Math.abs(price - dailyOpen) / dailyOpen;
+    if (move >= CIRCUIT_LIMIT) {
+        MARKET_STATE[ticker].haltUntil = Date.now() + HALT_DURATION_MS;
+        const dir = price > dailyOpen ? '🚨 UPPER' : '🚨 LOWER';
+        log(`[CIRCUIT] ${dir} — ${ticker} halted 10s (${(move * 100).toFixed(1)}% move)`);
+        return true;
+    }
+    return false;
+}
+
+// ── BOT FACTORY ───────────────────────────────────────────────────────────────
+// Valid 24-char hex ObjectId so Mongoose doesn't throw cast errors
+function fakeObjectId(workerId, botIndex) {
+    const prefix = (workerId * 1000 + botIndex).toString(16).padStart(8, '0');
+    const fill   = Math.floor(Math.random() * 0xffffffffffff).toString(16).padStart(16, '0');
+    return (prefix + fill).substring(0, 24);
+}
+
+function createBot(localId, personality, ticker) {
+    const baseCash = {
+        market_maker: 500_000,
+        noise_trader:  50_000,
+        whale:       2_000_000,
+        contrarian:   200_000,
+    }[personality];
+
+    const baseShares = {
+        market_maker: 200,
+        noise_trader:  30,
+        whale:        500,
+        contrarian:   100,
+    }[personality];
+
+    return {
+        id:          `w${workerId}_${localId}`,
+        userId:      fakeObjectId(workerId, localId),
+        personality,
+        ticker,
+        cash:        baseCash + Math.random() * baseCash * 0.2,
+        shares:      baseShares + Math.floor(Math.random() * 20),
+    };
+}
+
+// ── BUILD BOT POOL: 125 bots per worker, all 4 personalities ─────────────────
+// Per ticker (4 tickers): 10 market makers, 12 noise traders, 5 whales, 4 contrarians = ~31 per ticker
+// 31 × 4 tickers = 124 bots + 1 extra noise trader = 125 total per worker
+const BOTS = [];
+let localId = 0;
+
+for (const ticker of TICKERS) {
+    for (let i = 0; i < 5; i++) BOTS.push(createBot(localId++, 'market_maker', ticker)); //10
+    for (let i = 0; i < 4; i++) BOTS.push(createBot(localId++, 'noise_trader', ticker)); //12
+    for (let i = 0; i <  2; i++) BOTS.push(createBot(localId++, 'whale',        ticker)); //5
+    for (let i = 0; i <  2; i++) BOTS.push(createBot(localId++, 'contrarian',   ticker)); //4
+}
+// Add 1 extra noise trader to hit exactly 125
+BOTS.push(createBot(localId++, 'noise_trader', TICKERS[0]));
+
+// ── ORDER GENERATION ──────────────────────────────────────────────────────────
+function generateOrder(bot) {
+    const state = MARKET_STATE[bot.ticker];
+    const last  = state.lastPrice;
+
+    switch (bot.personality) {
+        case 'market_maker': {
+            const side   = Math.random() > 0.5 ? 'BUY' : 'SELL';
+            const spread = last * 0.001;
+            const price  = side === 'BUY'
+                ? parseFloat((last - spread * (0.5 + Math.random())).toFixed(2))
+                : parseFloat((last + spread * (0.5 + Math.random())).toFixed(2));
+            const qty    = Math.floor(Math.random() * 30) + 5;
+            if (side === 'BUY'  && bot.cash   < price * qty) return null;
+            if (side === 'SELL' && bot.shares < qty)          return null;
+            return { side, price, quantity: qty };
+        }
+
+        case 'noise_trader': {
+            const side   = Math.random() > 0.5 ? 'BUY' : 'SELL';
+            const jitter = (Math.random() * 2 - 1) * last * 0.003;
+            const price  = parseFloat((last + jitter).toFixed(2));
+            const qty    = Math.floor(Math.random() * 15) + 1;
+            if (side === 'BUY'  && bot.cash   < price * qty) return null;
+            if (side === 'SELL' && bot.shares < qty)          return null;
+            return { side, price, quantity: qty };
+        }
+
+        case 'whale': {
+            const side  = Math.random() > 0.45 ? 'BUY' : 'SELL';
+            const aggr  = last * (0.002 + Math.random() * 0.004);
+            const price = side === 'BUY'
+                ? parseFloat((last + aggr).toFixed(2))
+                : parseFloat((last - aggr).toFixed(2));
+            const qty   = Math.floor(Math.random() * 200) + 100;
+            if (side === 'BUY'  && bot.cash   < price * qty) return null;
+            if (side === 'SELL' && bot.shares < qty)          return null;
+            return { side, price, quantity: qty };
+        }
+
+        case 'contrarian': {
+            const trendUp = last > state.dailyOpen;
+            const side    = trendUp ? 'SELL' : 'BUY';
+            const jitter  = (Math.random() * 0.002) * last;
+            const price   = side === 'BUY'
+                ? parseFloat((last - jitter).toFixed(2))
+                : parseFloat((last + jitter).toFixed(2));
+            const qty     = Math.floor(Math.random() * 50) + 10;
+            if (side === 'BUY'  && bot.cash   < price * qty) return null;
+            if (side === 'SELL' && bot.shares < qty)          return null;
+            return { side, price, quantity: qty };
+        }
+    }
+}
+
+// ── CAPITAL BOOKKEEPING ───────────────────────────────────────────────────────
+function deductCapital(bot, side, price, qty) {
+    if (side === 'BUY') {
+        bot.cash   -= price * qty;
+        bot.shares += qty;
+    } else {
+        bot.cash   += price * qty;
+        bot.shares  = Math.max(0, bot.shares - qty);
+    }
+    if (bot.cash   < 5_000) { bot.cash   += 50_000; }
+    if (bot.shares < 5)     { bot.shares += 50;     }
+}
+
+// ── FIRE ORDER ────────────────────────────────────────────────────────────────
+let tickCount = 0;
+
+async function fireBotOrder(bot) {
+    const ticker = bot.ticker;
+    if (isHalted(ticker)) return;
+
+    const order = generateOrder(bot);
+    if (!order) return;
+
+    const { side, price, quantity } = order;
+    if (price <= 0) return;
+    if (checkCircuit(ticker, price)) return;
+
+    deductCapital(bot, side, price, quantity);
+    MARKET_STATE[ticker].lastPrice = price;
+
+    try {
+        await producer.send({
+            topic:    'order-requests',
+            messages: [{ key: ticker, value: JSON.stringify({
+                orderId: `sim_${randomUUID()}`, //so we can tell a bot apart from real human
+                userId:    bot.userId,
+                ticker,
+                side,
+                price,
+                quantity,
+                timestamp: new Date().toISOString(),
+            })}],
+        });
+        tickCount++;
+    } catch (err) {
+        log(`⚠️  Bot ${bot.id} send error: ${err.message}`);
+    }
+}
+
+// ── TICK INTERVALS PER PERSONALITY ───────────────────────────────────────────
+const TICK_INTERVALS = {
+    market_maker: 400,
+    noise_trader: 250,
+    whale:       3000,
+    contrarian:   800,
+};
+
+// ── START ─────────────────────────────────────────────────────────────────────
+function log(msg) {
+    parentPort.postMessage({ type: 'log', data: `[W${workerId}] ${msg}` });
+}
+
+async function startSimulation() {
+    await producer.connect();
+    log(`✅ Kafka connected — ${BOTS.length} bots across ${TICKERS.length} tickers`);
+
+    for (const bot of BOTS) {
+        const interval   = TICK_INTERVALS[bot.personality];
+        const startDelay = Math.random() * interval;
+        setTimeout(() => {
+            setInterval(() => fireBotOrder(bot), interval);
+        }, startDelay);
+    }
+
+    // Per-worker snapshot every 15 seconds
+    setInterval(() => {
+        log(`📊 Ticks fired: ${tickCount} | Prices: ${
+            TICKERS.map(t => `${t} ₹${MARKET_STATE[t].lastPrice.toFixed(0)}`).join(' | ')
+        }`);
+    }, 15_000);
+
+    log(`🚀 All ${BOTS.length} bots live`);
+}
+
+startSimulation().catch(err => log(`🚨 ${err.message}`));
+
+/*
+kafkaBrokers ? why did it go from kafka to kafka brokers without the url now ? 
+log level? 
+
+differnece between const and function ? 
+*/"
+
+package json"{
+  "name": "backend-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "bots": "node botWorker.js",
+    "engine": "node engine.js",
+    "chart": "node chartEngine.js",
+    "sim": "node simulator.js",
+    "all": "concurrently \"node server.js\" \"node engine.js\" \"node chartEngine.js\" \"node simulator.js\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "kafkajs": "^2.2.4",
+    "mongoose": "^9.6.3",
+    "prom-client": "^15.1.3",
+    "redis": "^6.0.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}
+"
+db"import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import {User } from './model.js'; //Import our new models
+
+dotenv.config();
+
+const connectDB = async () => {
+    try{
+        //This pulls the exact string we jsut saved in your .env file
+        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        console.log(`MongoDB connected successflly : ${conn.connection.host}`);
+
+        //Seed a permanent test user if the collection is empty 
+        const usersToSeed = [
+            { username : 'varun_developer' , email : 'varun@example.com' , apiKey : 'varun_secret_key'},
+            {username : 'xyz_trader' , email : 'xyz@example.com' , apiKey : 'xyz_secret_key'}
+        ];
+        for( const userData of usersToSeed){
+            const userExists = await User.findOne({ username : userData.username });
+            if(!userExists ) {
+                const newUser = await User.create(userData);
+                console.log(` Seeded User : ${newUser.username} | ID : ${newUser._id}`);
+            }
+            else{
+                console.log(`Active User : ${userExists.username} | ID: ${userExists._id}`);
+            }
+            
+        }
+    }
+    catch(error){
+        console.error(`Database connection failed : ${error.message}`);
+        process.exit(1);
+    }
+};
+
+export default connectDB;
+
+
+/*
+
+whats findOne ? 
+userData is just a iterator right ? no other significance ? 
+*/"
+
+engine"import { Kafka } from 'kafkajs';
+import { createClient } from 'redis';
+import { HistoricalTrade } from './model.js';
+import connectDB from './db.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+// ── KAFKA ─────────────────────────────────────────────────────────────────────
+const kafka = new Kafka({
+    clientId: 'matching-engine',
+    brokers: [process.env.KAFKA_BROKERS || 'localhost:9092']
+});
+
+// Engine consumes order-requests, publishes to completed-trades AND trade-fills
+const consumer = kafka.consumer({ groupId: 'matching-engine-group' });
+const producer  = kafka.producer();
+
+// ── REDIS ─────────────────────────────────────────────────────────────────────
+const redisClient = createClient({
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+redisClient.on('error', (err) => console.error('[ENGINE] Redis error:', err));
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+const startEngine = async () => {
+    try {
+        await connectDB();
+        await redisClient.connect();
+        console.log('[ENGINE] ✅  Redis connected');
+
+        await producer.connect();
+        await consumer.connect();
+        console.log('[ENGINE] ✅  Kafka producer + consumer connected');
+
+        await consumer.subscribe({ topic: 'order-requests', fromBeginning: true });
+        console.log('[ENGINE] 🚀  Matching engine live — consuming order-requests\n');
+
+        await consumer.run({
+            eachMessage: async ({ message }) => {
+                const incomingOrder = JSON.parse(message.value.toString());
+                const { orderId, userId, ticker, side, price, quantity } = incomingOrder;
+
+                console.log(`\n📦 [ENGINE] ${side} ${ticker} | Qty ${quantity} @ ₹${price}`);
+
+                const buyBookKey  = `orders:${ticker}:BUY`;
+                const sellBookKey = `orders:${ticker}:SELL`;
+                let remainingQty  = quantity;
+
+                try {
+                    if (side === 'BUY') {
+                        while (remainingQty > 0) {
+                            const bestSells = await redisClient.zRangeWithScores(sellBookKey, 0, 0);
+                            if (bestSells.length === 0) break;
+
+                            const cheapestSellOrder = JSON.parse(bestSells[0].value);
+                            const cheapestSellPrice = bestSells[0].score;
+
+                            if (price >= cheapestSellPrice) {
+                                const matchQty = Math.min(remainingQty, cheapestSellOrder.quantity);
+                                console.log(`   ✅  MATCH: ${matchQty} shares of ${ticker} @ ₹${cheapestSellPrice}`);
+
+                                // 1. Notify chart engine
+                                await producer.send({
+                                    topic: 'completed-trades',
+                                    messages: [{
+                                        key: ticker,
+                                        value: JSON.stringify({
+                                            ticker,
+                                            price:    parseFloat(cheapestSellPrice),
+                                            quantity: parseInt(matchQty),
+                                            timestamp: new Date().toISOString()
+                                        })
+                                    }]
+                                });
+
+                                // 2. Notify server.js → Socket.io via trade-fills topic
+                                await producer.send({
+                                    topic: 'trade-fills',
+                                    messages: [{
+                                        key: ticker,
+                                        value: JSON.stringify({
+                                            buyerUserId:  userId,
+                                            sellerUserId: cheapestSellOrder.userId,
+                                            ticker,
+                                            price:    parseFloat(cheapestSellPrice),
+                                            quantity: parseInt(matchQty),
+                                            timestamp: new Date().toISOString()
+                                        })
+                                    }]
+                                });
+
+                                remainingQty -= matchQty;
+                                cheapestSellOrder.quantity -= matchQty;
+
+                                // 3. Persist to MongoDB
+                                await Promise.all([
+                                    new HistoricalTrade({ userId, ticker, price: cheapestSellPrice, quantity: matchQty, side: 'BUY' }).save(),
+                                    new HistoricalTrade({ userId: cheapestSellOrder.userId, ticker, price: cheapestSellPrice, quantity: matchQty, side: 'SELL' }).save()
+                                ]);
+
+                                // 4. Update Redis order book
+                                await redisClient.zRem(sellBookKey, bestSells[0].value);
+                                if (cheapestSellOrder.quantity > 0) {
+                                    await redisClient.zAdd(sellBookKey, { score: cheapestSellPrice, value: JSON.stringify(cheapestSellOrder) });
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if (remainingQty > 0) {
+                            const partialOrder = { orderId, userId, ticker, side, price, quantity: remainingQty };
+                            await redisClient.zAdd(buyBookKey, { score: price, value: JSON.stringify(partialOrder) });
+                        }
+
+                    } else if (side === 'SELL') {
+                        while (remainingQty > 0) {
+                            const bestBuys = await redisClient.zRangeWithScores(buyBookKey, -1, -1);
+                            if (bestBuys.length === 0) break;
+
+                            const highestBuyOrder = JSON.parse(bestBuys[0].value);
+                            const highestBuyPrice = bestBuys[0].score;
+
+                            if (price <= highestBuyPrice) {
+                                const matchQty = Math.min(remainingQty, highestBuyOrder.quantity);
+                                console.log(`   ✅  MATCH: ${matchQty} shares of ${ticker} @ ₹${highestBuyPrice}`);
+
+                                await producer.send({
+                                    topic: 'completed-trades',
+                                    messages: [{
+                                        key: ticker,
+                                        value: JSON.stringify({
+                                            ticker,
+                                            price:    parseFloat(highestBuyPrice),
+                                            quantity: parseInt(matchQty),
+                                            timestamp: new Date().toISOString()
+                                        })
+                                    }]
+                                });
+
+                                await producer.send({
+                                    topic: 'trade-fills',
+                                    messages: [{
+                                        key: ticker,
+                                        value: JSON.stringify({
+                                            buyerUserId:  highestBuyOrder.userId,
+                                            sellerUserId: userId,
+                                            ticker,
+                                            price:    parseFloat(highestBuyPrice),
+                                            quantity: parseInt(matchQty),
+                                            timestamp: new Date().toISOString()
+                                        })
+                                    }]
+                                });
+
+                                remainingQty -= matchQty;
+                                highestBuyOrder.quantity -= matchQty;
+
+                                await Promise.all([
+                                    new HistoricalTrade({ userId, ticker, price: highestBuyPrice, quantity: matchQty, side: 'SELL' }).save(),
+                                    new HistoricalTrade({ userId: highestBuyOrder.userId, ticker, price: highestBuyPrice, quantity: matchQty, side: 'BUY' }).save()
+                                ]);
+
+                                await redisClient.zRem(buyBookKey, bestBuys[0].value);
+                                if (highestBuyOrder.quantity > 0) {
+                                    await redisClient.zAdd(buyBookKey, { score: highestBuyPrice, value: JSON.stringify(highestBuyOrder) });
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if (remainingQty > 0) {
+                            const partialOrder = { orderId, userId, ticker, side, price, quantity: remainingQty };
+                            await redisClient.zAdd(sellBookKey, { score: price, value: JSON.stringify(partialOrder) });
+                        }
+                    }
+
+                } catch (dbError) {
+                    console.error('[ENGINE] ❌  Matching loop fault:', dbError.message);
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('[ENGINE] Critical startup failure:', err);
+        process.exit(1);
+    }
+};
+
+startEngine();"
+
+model "import mongoose from 'mongoose';
+
+//1. USER SCHEMA
+
+const userSchema = new mongoose.Schema({
+    username : { type : String , required : true , unique : true},
+    email : { type : String  , required : true , unique : true} ,
+    apiKey : { type : String , unique : true} //for unique user authentication in real production scenario
+}, { timestamps : true});
+
+//2. PORTFOLIO SCHEMA (User-Differentiated Accumulator)
+const portfolioSchema = new mongoose.Schema({
+    
+    userId : { type : mongoose.Schema.Types.ObjectId , ref : 'User', required : true },
+    ticker : { type : String ,required: true },
+
+    totalShares : { type : Number , default : 0 },
+    averageBuyPrice : {type : Number , default : 0} ,
+    totalInvested : { type : Number , default : 0 } 
+} , {timestamps: true});
+
+
+//Ensure a user can only have one unique portfolio document per ticker asset 
+portfolioSchema.index({ userId : 1 , ticker : 1} , {unique : true});
+
+
+//3. UPDATED TRADE HISTORICAL LOG SCHEMA 
+const tradeSchema = new mongoose.Schema({
+    userId : { type : mongoose.Schema.Types.ObjectId , ref : 'User' , required : true },
+    ticker : { type : String, required : true },
+    price :  { type : Number , required : true  },
+    quantity : { type : Number , required : true },
+    side : { type : String , enum : ['BUY' , 'SELL'] , required : true},
+    timestamp : { type : Date , default : Date.now}
+
+});
+
+export const User = mongoose.model('User' , userSchema);
+export const Portfolio = mongoose.model('Portfolio' , portfolioSchema);
+export const HistoricalTrade = mongoose.model('HistoricalTrade' , tradeSchema);
+
+
+const CandleSchema  = new mongoose.Schema({
+    ticker : { type : String ,  required : true },
+    timestamp : { type : Date , required : true },
+    open : { type : Number , required : true },
+    high : { type : Number , required : true },
+    low : { type : Number , required : true },
+    close : { type : Number , required : true },
+    volume : { type : Number , required : true }
+}, { timestamps : true});
+
+CandleSchema.index({ticker : 1 , timestamp : 1 });
+
+const Candle = mongoose .model('Candle ' , CandleSchema);
+export { Candle };
+
+
+/*
+that looks like sql table declaration for const userSchema
+
+
+why are we sepeareting userschema and protfolio schema without actually having a user database to fnction for seperate users ? isnt it just accumulating for the same person then?
+
+index keyword ? first time seeing that and 
+i see before it had only 1 curlly braces . this one has multiple in the same like in portfolio Schema . index
+why is that ? 
+
+
+*/"
+
+
+
+
+

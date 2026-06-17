@@ -1,0 +1,57 @@
+import dotenv from 'dotenv';
+import mongoose from 'mongoose';
+import {User } from './model.js'; //Import our new models
+
+dotenv.config();
+
+const connectDB = async () => {
+    try{
+        //This pulls the exact string we jsut saved in your .env file
+        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        console.log(`MongoDB connected successflly : ${conn.connection.host}`);
+
+        //Seed a permanent test user if the collection is empty 
+        const userExists = await User.findOne({ username : 'varun_developer'}); //built-in asynchronous function
+        if(!userExists){
+            const mockUser = await User.create({
+                username : 'varun_developer',
+                email : 'varun@example.com',
+                apiKey : 'varun_secret_key'
+            });
+
+            console.log(`Mock User Seeded . Use this ID in your payloads ${mockUser._id}`);
+        }
+        else{
+            console.log(`Active Dev user Context : ${userExists._id} (${userExists.username})`);
+            }
+        
+    }
+    catch(error){
+        console.error(`Database connection failed : ${error.message}`);
+        process.exit(1);
+    }
+};
+
+export default connectDB;
+
+
+/*
+
+connection host ? 
+error message ? 
+module exports ? we are forwarding an instance to export?
+
+*/
+
+/*
+process.env.MONGODB_URI: No, it's not a JavaScript keyword. process.env is a global Node.js object that contains your environment configuration. Think of it as a folder containing secret keys. .MONGODB_URI is just the specific name of the variable you wrote inside your hidden .env file to hold your Atlas password string.
+
+${conn.connection.host}: When Mongoose successfully logs into Atlas, it returns a massive object representing that connection (conn). Accessing .connection.host simply reads the specific server URL you connected to so it can print it out in your console (e.g., cluster0-shard-00...). It’s just a way to prove you’re truly connected.
+
+${error.message}: If the database connection fails (like a bad password or network drop), Node.js generates an error object. .message strips away all the messy computer jargon and gives you a readable, human sentence explaining why it failed.
+
+module.exports = connectDB: You asked if we are forwarding an instance to export. Yes, exactly! We are packaging up the connectDB function we just created and making it available so that your main server.js file can import it and run it.
+
+
+User.findONe ? keyword ? whats that ? eh ? 
+*/

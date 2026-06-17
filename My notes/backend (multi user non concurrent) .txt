@@ -1,0 +1,27 @@
+If you uncheck `varun_secret_key` and only leave `xyz_secret_key` checked, **only the incognito browser tab (`xyz_trader`) will update.** The regular tab (`varun_developer`) will do absolutely nothing.
+
+Here is why:
+
+When Thunder Client sends the request with *only* the `xyz_secret_key` checked, the server extracts that single key, goes to MongoDB, and finds `xyz_trader`'s unique user ID (`6a1dd7469a53d1d1623887de`).
+
+The backend then explicitly stamps that specific ID onto the trade payload before handing it to Kafka. When the Kafka consumer reads it, it executes:
+
+```javascript
+io.to("6a1dd7469a53d1d1623887de").emit('live-ticker-update', ...);
+
+```
+
+Because your normal browser tab is locked inside a completely different virtual room named after *Varun's* ID, Socket.io completely ignores it. Only the incognito tab listening inside the `xyz_trader` room catches the data stream.
+
+---
+
+### Want to make them both work?
+
+If you want to see data pop up on your normal browser tab (`varun_developer`), you just run a second test in Thunder Client with the opposite setup:
+
+1. **Uncheck** `xyz_secret_key`.
+2. **Check** `varun_secret_key`.
+3. Change your JSON body ticker to something else (like `"TATAMOTORS"`) just to make the visual difference obvious.
+4. Hit **Send**.
+
+Suddenly, the routing engine reverses. The incognito tab will stay totally silent, and your main browser window will instantly pop up with the live Tata Motors stream. That is true multi-user account isolation in action!

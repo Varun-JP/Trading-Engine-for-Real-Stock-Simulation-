@@ -1,0 +1,198 @@
+%-------------------------
+% Resume in Latex
+%-------------------------
+
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{tabularx}
+
+% Unicode handling
+\ifx\pdfgentounicode\undefined
+\else
+  \input{glyphtounicode}
+  \pdfgentounicode=1
+\fi
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+%----------PAGE MARGINS----------
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-0.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+%----------SECTION FORMATTING----------
+
+\titleformat{\section}
+  {\vspace{-4pt}\scshape\raggedright\large}
+  {}{0em}{}[\titlerule \vspace{-5pt}]
+
+%----------CUSTOM COMMANDS----------
+
+\newcommand{\resumeItem}[1]{
+  \item \small{#1 \vspace{-2pt}}
+}
+
+\newcommand{\resumeHeading}[2]{%
+  \vspace{-2pt}\item[]%
+  \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+    \textbf{#1} & #2 \\
+  \end{tabular*}%
+  \vspace{-7pt}%
+}
+
+\newcommand{\resumeProject}[1]{%
+  \vspace{-2pt}\item[]%
+  \textbf{#1}%
+  \vspace{-5pt}%
+}
+
+\newcommand{\resumeListStart}{%
+  \begin{itemize}[leftmargin=0.15in]%
+}
+
+\newcommand{\resumeListEnd}{%
+  \end{itemize}\vspace{-5pt}%
+}
+
+%-------------------------
+% RESUME STARTS HERE
+%-------------------------
+
+\begin{document}
+
+%----------HEADING----------
+
+\begin{center}
+  {\Huge \textbf{VARUN JAYPRAKASH}} \\ \vspace{3pt}
+  \small
+  +91 8097644905 $|$
+  \href{mailto:varunjayprakash25@gmail.com}{varunjayprakash25@gmail.com} $|$
+  \href{https://github.com/Varun-JP}{github.com/Varun-JP} $|$
+  \href{https://www.linkedin.com/in/varun-jp-potty}{linkedin.com/in/varun-jp-potty}
+\end{center}
+
+%-----------TECHNICAL SKILLS-----------
+
+\section{Technical Skills}
+\begin{itemize}[leftmargin=0.15in, label={}]
+\small{\item{
+  \textbf{Languages:} Python, Java, C++, SQL, R \\
+  \textbf{Web \& Backend:} React, JavaScript, Node.js, Django, Streamlit, Tailwind CSS, Vite \\
+  \textbf{Databases:} MySQL \\
+  \textbf{AI / ML:} PyTorch, TensorFlow, Scikit-learn, HuggingFace Transformers, LangChain, NumPy, Pandas, OpenCV, NLP, RAG Systems, Generative AI \\
+  \textbf{Tools:} Git, Docker, Tableau, Power BI, Twilio, Codemagic, Excel
+}}
+\end{itemize}
+
+%-----------EDUCATION-----------
+
+\section{Education}
+\begin{itemize}[leftmargin=0.15in, label={}]
+  \resumeHeading
+    {Bharati Vidyapeeth (Deemed to be University)}{Dec 2021 -- Jun 2025}%
+  \resumeListStart
+    \resumeItem{B.Tech in Computer Science and Engineering (AI \& ML) --- CGPA: 9.76}
+  \resumeListEnd
+
+  \resumeHeading
+    {Mahatma School of Academics and Sports}{Jun 2019 -- Aug 2021}%
+  \resumeListStart
+    \resumeItem{Higher Secondary Certificate (12th) --- CGPA: 8.1}
+  \resumeListEnd
+\end{itemize}
+
+%-----------EXPERIENCE-----------
+
+\section{Experience}
+\begin{itemize}[leftmargin=0.15in, label={}]
+
+  \resumeHeading
+    {Applied ML Project --- Next24Tech (Remote)}{Jul 2024 -- Aug 2024}%
+  \resumeListStart
+    \resumeItem{Built a heat-wave alert system using deep learning models trained on historical weather datasets.}
+    \resumeItem{Integrated Twilio API to send real-time SMS alerts for predicted heat-wave events.}
+    \resumeItem{Developed an interactive Streamlit dashboard for visualization and monitoring.}
+  \resumeListEnd
+
+  \resumeHeading
+    {Technical Lead --- ACM Student Chapter, BVDUDET}{Jul 2023 -- Jun 2024}%
+  \resumeListStart
+    \resumeItem{Led technical planning and execution for workshops, hackathons, and coding events.}
+    \resumeItem{Coordinated development tasks involving APIs, automation scripts, and web applications.}
+    \resumeItem{Conducted sessions on Python, Git, and AI/ML fundamentals.}
+  \resumeListEnd
+
+\end{itemize}
+
+%-----------PROJECTS-----------
+
+\section{Projects}
+\begin{itemize}[leftmargin=0.15in, label={}]
+
+  \resumeProject
+    {Open Source Contributor --- AOSSIE}%
+  \resumeListStart
+    \resumeItem{Contributed to open-source projects involving backend validation, workflow improvements, and issue resolution.}
+    \resumeItem{Participated in pull request reviews, collaborative development workflows, and shared codebase contributions.}
+    \resumeItem{Worked on feature enhancements, input handling improvements, and bug-fix related development tasks.}
+  \resumeListEnd
+
+  \resumeProject
+    {AI-Based Travel Itinerary Planner}%
+  \resumeListStart
+    \resumeItem{Developed an AI-powered itinerary generation system optimizing travel cost, transit efficiency, and destination preferences.}
+    \resumeItem{Integrated external APIs for flight pricing and transit information.}
+    \resumeItem{Designed multi-stage travel planning workflows based on user-defined constraints.}
+  \resumeListEnd
+
+  \resumeProject
+    {Stock Price Prediction Pipeline}%
+  \resumeListStart
+    \resumeItem{Designed a Python pipeline for preprocessing, feature engineering, and model training.}
+    \resumeItem{Implemented regression and LSTM-based time-series forecasting models.}
+    \resumeItem{Automated experimentation workflows for comparative evaluation.}
+  \resumeListEnd
+
+  \resumeProject
+    {Document Summarization System (NLP)}%
+  \resumeListStart
+    \resumeItem{Built an abstractive summarization system using Transformer-based Seq2Seq models.}
+    \resumeItem{Optimized preprocessing and inference for multi-document summarization tasks.}
+  \resumeListEnd
+
+  \resumeProject
+    {Automated Lane Recognition System}%
+  \resumeListStart
+    \resumeItem{Implemented real-time lane detection using Canny edge detection and Hough transforms.}
+    \resumeItem{Evaluated robustness across varying lighting and road conditions.}
+  \resumeListEnd
+
+\end{itemize}
+
+%-----------CERTIFICATIONS-----------
+
+\section{Certifications}
+\begin{itemize}[leftmargin=0.15in, label={}]
+\small{\item{
+  \textbf{Spoken Tutorial -- IIT Bombay:} Python, Java, JavaScript, Linux, LaTeX, Bash \\
+  \textbf{Google Cloud Career Readiness Program (GCCP)} \\
+  \textbf{McKinsey Forward Program 2025}
+}}
+\end{itemize}
+
+\end{document}

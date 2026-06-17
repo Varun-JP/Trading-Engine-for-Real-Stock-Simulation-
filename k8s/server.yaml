@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus-server
+  template:
+    metadata:
+      labels:
+        app: nexus-server
+    spec:
+      initContainers:
+      - name: wait-for-kafka
+        image: busybox
+        command: ['sh', '-c', 'until nc -z kafka 9092; do echo waiting for kafka; sleep 5; done']
+      containers:
+      - name: nexus-server
+        image: varun123jjsdj/nexus-server:latest
+        command: ["node", "server.js"]
+        env:
+        - name: KAFKA_BROKERS
+          value: "kafka:9092"
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        envFrom:
+        - secretRef:
+            name: nexus-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-server
+spec:
+  selector:
+    app: nexus-server
+  ports:
+  - port: 5000
+    targetPort: 5000
+    nodePort: 30001
+  type: NodePort

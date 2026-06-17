@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Financial Ticker Stream</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            padding: 40px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #38bdf8; border-bottom: 2px solid #334155; padding-bottom: 10px; }
+        .status {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .connected { background-color: #065f46; color: #34d399; }
+        .disconnected { background-color: #991b1b; color: #f87171; }
+        .order-desk {
+            background-color: #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #334155;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .form-group { display: inline-block; margin-right: 15px; vertical-align: top; }
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: #94a3b8;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .form-group input, .form-group select {
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: #f8fafc;
+            font-size: 16px;
+            width: 140px;
+        }
+        .btn-order {
+            padding: 11px 25px;
+            background-color: #0ea5e9;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        .btn-order:hover { background: #0284c7; }
+        .feed-container {
+            background-color: #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #334155;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .tick-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        .tick-item:last-child { border-bottom: none; }
+        .ticker-name { font-weight: bold; font-size: 18px; color: #e2e8f0; }
+        .price { font-family: 'Courier New', Courier, monospace; font-size: 18px; }
+        .side-buy { color: #4ade80; font-weight: 600; }
+        .side-sell { color: #f87171; font-weight: 600; }
+        .time { color: #64748b; font-size: 12px; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div style="background: #1c2030; border-bottom: 1px solid #2a2e3f; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; font-family: sans-serif;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px; font-weight: bold; color: #26a69a; letter-spacing: 0.5px;">⚡ NEXUS EXCHANGE</span>
+        </div>
+        <div style="display: flex; gap: 15px;">
+            <a href="/index.html" style="color: #d1d4dc; text-decoration: none; font-weight: bold; font-size: 14px; padding: 6px 12px; border-radius: 4px; background: #26a69a; transition: 0.2s;">📋 Order Desk</a>
+            <a href="/chart.html" style="color: #d1d4dc; text-decoration: none; font-weight: bold; font-size: 14px; padding: 6px 12px; border-radius: 4px; background: #2a2e3f; transition: 0.2s;">📊 Live Charts</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1>📈 Live Financial Ingestion Stream</h1>
+        <div id="connection-status" class="status disconnected">Connecting to Backend WebSocket...</div>
+        
+        <div id="dashboard" style="display: none;">
+            <div class="order-desk">
+                <h3 style="margin-top: 0; color: #38bdf8;">Order Entry Desk</h3>
+                <div class="form-group">
+                    <label>Ticker</label>
+                    <select id="orderTicker">
+                        <option value="RELIANCE">RELIANCE</option>
+                        <option value="TCS">TCS</option>
+                        <option value="INFY">INFY</option>
+                        <option value="HDFCBANK">HDFCBANK</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Side</label>
+                    <select id="orderSide">
+                        <option value="BUY">BUY</option>
+                        <option value="SELL">SELL</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Price (₹)</label>
+                    <input type="number" id="orderPrice" placeholder="e.g. 2500.50">
+                </div>
+                <div class="form-group">
+                    <label>Quantity</label>
+                    <input type="number" id="orderQuantity" placeholder="e.g. 100">
+                </div>
+                <br>
+                <button class="btn-order" id="submitOrderBtn">Place Order</button>
+                <span id="orderStatusMsg" style="margin-left: 15px; font-size: 14px;"></span>
+            </div>
+
+            <div class="feed-container" id="feed">
+                <div style="color: #64748b; text-align: center; margin-top: 150px;" id="placeholder">
+                    Waiting for incoming Kafka trade ticks... Place an order above to trigger the stream.
+                </div>
+            </div>
+        </div>
+
+        <!-- login screen, shown only if no key in sessionStorage -->
+        <div id="login">
+            <div style="text-align: center; margin-top: 120px;">
+                <h2 style="color:#38bdf8">Enter your API Key</h2>
+                <input id="apiKeyInput" type="text" placeholder="e.g. varun_secret_key"
+                    style="padding:10px; width:300px; border-radius:6px; border:1px solid #334155;
+                    background:#1e293b; color:#f8fafc; font-size:16px; margin-top:16px;">
+                <br>
+                <button id="connectBtn"
+                    style="margin-top:16px; padding:10px 28px; background:#0ea5e9;
+                    color:white; border:none; border-radius:6px; font-size:16px; cursor:pointer;">
+                    Connect
+                </button>
+                <p id="loginError" style="color:#f87171; margin-top:12px;"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const statusDiv   = document.getElementById('connection-status');
+        const feedDiv     = document.getElementById('feed');
+        const placeholder = document.getElementById('placeholder');
+
+        // ── SESSION STORAGE: restore key across page switches ─────────────────
+        let activeApiKey = sessionStorage.getItem('apiKey') || '';
+
+        function bootSocket(apiKey) {
+            const socket = io({ auth: { token: apiKey } });
+
+            socket.on('connect', () => {
+                // Save key so other pages can read it too
+                sessionStorage.setItem('apiKey', apiKey);
+                activeApiKey = apiKey;
+
+                document.getElementById('login').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                statusDiv.textContent = "🟢 WebSocket Connected — UI Live";
+                statusDiv.className = "status connected";
+            });
+
+            socket.on('connect_error', (err) => {
+                // Bad key — wipe it so user sees login again on refresh
+                sessionStorage.removeItem('apiKey');
+                document.getElementById('loginError').textContent = err.message;
+            });
+
+            socket.on('disconnect', () => {
+                statusDiv.textContent = "🔴 WebSocket Disconnected";
+                statusDiv.className = "status disconnected";
+            });
+
+            socket.on('live-ticker-update', (data) => {
+                if (placeholder) placeholder.remove();
+
+                const item = document.createElement('div');
+                item.className = 'tick-item';
+
+                const sideClass  = data.side.toUpperCase() === 'BUY' ? 'side-buy' : 'side-sell';
+                const localTime  = new Date(data.timestamp).toLocaleTimeString();
+
+                item.innerHTML = `
+                    <div>
+                        <span class="ticker-name">${data.ticker}</span>
+                        <span class="time">(${localTime})</span>
+                    </div>
+                    <div>
+                        <span class="${sideClass}">${data.side.toUpperCase()}</span>
+                        <span class="price" style="margin-left: 20px;">₹${Number(data.price).toFixed(2)}</span>
+                    </div>
+                `;
+                feedDiv.insertBefore(item, feedDiv.firstChild);
+            });
+        }
+
+        // ── AUTO-LOGIN if key already in sessionStorage ───────────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            if (activeApiKey) {
+                bootSocket(activeApiKey);
+            }
+        });
+
+        // ── MANUAL LOGIN ──────────────────────────────────────────────────────
+        document.getElementById('connectBtn').addEventListener('click', () => {
+            const apiKey = document.getElementById('apiKeyInput').value.trim();
+            if (!apiKey) return;
+            bootSocket(apiKey);
+        });
+
+        // ── ORDER SUBMISSION ──────────────────────────────────────────────────
+        document.getElementById('submitOrderBtn').addEventListener('click', async () => {
+            const ticker    = document.getElementById('orderTicker').value;
+            const price     = parseFloat(document.getElementById('orderPrice').value);
+            const quantity  = parseInt(document.getElementById('orderQuantity').value);
+            const side      = document.getElementById('orderSide').value;
+            const statusMsg = document.getElementById('orderStatusMsg');
+
+            statusMsg.style.color   = '#64748b';
+            statusMsg.textContent   = "Submitting order...";
+
+            try {
+                const response = await fetch('/api/orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': activeApiKey
+                    },
+                    body: JSON.stringify({ ticker, price, quantity, side })
+                });
+
+                if (response.ok) {
+                    statusMsg.style.color   = '#4ade80';
+                    statusMsg.textContent   = "Order accepted by Ingestion Layer!";
+                    setTimeout(() => { statusMsg.textContent = ""; }, 3000);
+                } else {
+                    const errText = await response.text();
+                    statusMsg.style.color   = "#f87171";
+                    statusMsg.textContent   = `Rejected: ${response.status} (${errText})`;
+                }
+            } catch (err) {
+                statusMsg.style.color   = '#f87171';
+                statusMsg.textContent   = `Error: ${err.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
+
+<!--
+whats socket io ?
+socket.io/socket.io.js ?
+const socket = io() ? whats that supposed to mean ? input output ?
+why const ?
+
+socket on ? off ? connect ? disconnect ? placeholder.remove ? toLocaleTime ? toFixed ? insertBefore . firstChild ? feedDiv ?
+
+appendChild ?
+
+whats appendchild ?  as opposed to event listnere  . query seelector ? toLocale timestring ? feeddiv and insertbefore? 
+
+-->

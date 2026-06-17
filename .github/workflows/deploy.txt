@@ -1,0 +1,27 @@
+name: Build and Push Microservices
+
+on:
+  push:
+    branches:
+      - main  # Triggers whenever you push to main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: varun123jjsdj
+          password: ${{ secrets.DOCKER_HUB_TOKEN }} # Set this secure variable in GitHub settings later
+
+      - name: Build & Push Nexus Server
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile # Point to your server dockerfile context
+          push: true
+          tags: varun123jjsdj/nexus-server:latest

@@ -1,0 +1,46 @@
+We are using a matching engine because **that is what makes a trading platform an actual exchange**, rather than just a dummy dashboard.
+
+Right now, your app is basically a "ghost town." When you click BUY, the message is broadcast to the screen, but nothing actually *happens*. You could say you want to BUY 100 shares of RELIANCE at ₹2500, but who are you buying them from?
+
+The **Matching Engine** is the brain that turns individual intents into real economic events. Here is exactly why your architecture requires it:
+
+---
+
+### 1. It Enforces Market Reality (Price Discovery)
+
+In a real system, you can’t just make up a price and instantly own the stock. For a trade to happen, two people must agree:
+
+* **The Buyer** wants to buy as cheaply as possible.
+* **The Seller** wants to sell as expensively as possible.
+
+The matching engine acts as the absolute arbiter. If you submit a `BUY` order at ₹2500, the engine searches the market. If a seller is already sitting there offering it at ₹2500 or lower, **BOOM—a trade is born.** If the cheapest seller is asking for ₹2510, the engine blocks the execution and makes your order wait in line.
+
+---
+
+### 2. It Creates the Data that Feeds Everything Else
+
+Remember how we talked about building live Candlestick charts (OHLC) and training Machine Learning models later?
+
+* Right now, your charts would just be plotting whatever random, fake numbers a user types into the input box. That data is completely meaningless noise.
+* With a matching engine, a data point is generated **only when an actual match occurs**. That matched price becomes the **Last Traded Price (LTP)**. Your charts and your ML models will be analyzing *real transaction history*, not unexecuted user typing.
+
+---
+
+### 3. It Simulates Industrial Concurrency
+
+From a purely technical, software engineering perspective, a pass-through pipe doesn't test your backend skills. It's too easy for a server to just forward a text string.
+
+A matching engine forces you to solve real-world complex problems:
+
+* **Race Conditions:** What happens when 500 users all race to buy the exact same block of shares at the exact same millisecond?
+* **State Management:** How does Redis instantly keep track of who owns what share in memory while matching trades at microsecond speeds?
+
+---
+
+### In Simple Terms:
+
+Without a matching engine, your project is just a **chat room** where people yell out stock prices.
+
+With a matching engine, your project becomes a **mini-National Stock Exchange (NSE)** that actively pairs buyers with sellers, updates balances, and calculates true market prices in real time.
+
+Does that clarify why we are introducing this layer before jumping into heavier infrastructure like Kubernetes or ML?

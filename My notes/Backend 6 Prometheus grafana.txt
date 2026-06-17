@@ -1,0 +1,21 @@
+# 1. Add the official Prometheus stable repository
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+# 2. Install the complete Prometheus & Grafana stack in one go
+helm install monitoring prometheus-community/kube-prometheus-stack
+
+# 3. Check until all monitoring pods say 1/1 Running
+kubectl get pods
+
+
+winget install Helm.Helm
+
+if older windows then do :
+
+Invoke-WebRequest -Uri "https://get.helm.sh/helm-v3.14.2-windows-amd64.zip" -OutFile "$env:TEMP\helm.zip"
+
+Expand-Archive -Path "$env:TEMP\helm.zip" -DestinationPath "$env:TEMP\helm_extracted" -Force
+Move-Item -Path "$env:TEMP\helm_extracted\windows-amd64\helm.exe" -Destination "$env:Windir\system32\helm.exe" -Force
+
+helm version

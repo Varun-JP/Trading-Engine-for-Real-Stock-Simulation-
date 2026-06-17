@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Exchange | Trading Terminal</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <style>
+        /* CSS reset to create a locked, screen-fitted terminal layout */
+        html, body { 
+            height: 100%; 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background-color: #0b0e11; 
+            color: #eaecef; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* Top Navigation Header */
+        #navbar {
+            background: #161a1e; 
+            border-bottom: 1px solid #2b3139; 
+            padding: 10px 20px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between;
+            height: 30px;
+        }
+        #brand { font-size: 16px; font-weight: bold; color: #f0b90b; letter-spacing: 0.5px; }
+        .status { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 4px; }
+        .connected { background-color: rgba(14, 203, 129, 0.15); color: #0ecb81; }
+        .disconnected { background-color: rgba(246, 70, 93, 0.15); color: #f6465d; }
+
+        /* Gatekeeping Authorization Screen Overlay */
+        #auth-overlay { position: fixed; inset: 0; background: #0b0e11; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+        .login-box { text-align: center; background: #161a1e; padding: 40px; border-radius: 8px; border: 1px solid #2b3139; }
+        .login-box input { padding: 12px; width: 280px; border-radius: 4px; border: 1px solid #474d57; background: #1e2329; color: white; font-size: 14px; margin-bottom: 15px; display: block; }
+        .login-box input:focus { border-color: #f0b90b; outline: none; }
+
+        /* The Main Workspace Grid Setup */
+        #terminal-grid {
+            display: grid;
+            grid-template-columns: 280px 1fr 320px; /* Locked columns: Left panel, middle chart, right feed */
+            height: calc(100vh - 51px);
+            width: 100vw;
+            background: #0b0e11;
+        }
+
+        /* Panel Styling */
+        .panel { background: #161a1e; border: 1px solid #2b3139; display: flex; flex-direction: column; overflow: hidden; }
+        .panel-header { background: #1e2329; padding: 10px; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #b7bdc6; border-bottom: 1px solid #2b3139; }
+
+        /* Left Side: Asset Picker & Order Execution Forms */
+        #ticker-selector { padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-bottom: 1px solid #2b3139; }
+        .ticker-btn { background: #2b3139; color: #eaecef; border: none; padding: 8px; cursor: pointer; font-weight: bold; border-radius: 4px; font-size: 12px; transition: 0.1s; }
+        .ticker-btn:hover { background: #474d57; }
+        .ticker-btn.active { background: rgba(240, 185, 11, 0.15); color: #f0b90b; border: 1px solid #f0b90b; }
+
+        .order-form { padding: 15px; display: flex; flex-direction: column; gap: 12px; }
+        .form-field { display: flex; flex-direction: column; gap: 5px; }
+        .form-field label { font-size: 11px; color: #848e9c; font-weight: 600; text-transform: uppercase; }
+        .form-field input, .form-field select { padding: 8px; border-radius: 4px; border: 1px solid #474d57; background: #1e2329; color: white; font-size: 14px; }
+        .form-field input:focus { border-color: #f0b90b; outline: none; }
+        .btn-submit { margin-top: 10px; padding: 12px; border: none; border-radius: 4px; font-weight: bold; font-size: 14px; cursor: pointer; background-color: #0ecb81; color: #0b0e11; transition: 0.2s; }
+        .btn-submit:hover { opacity: 0.9; }
+
+        /* Middle Section: Chart Component & Real-Time Stats Banner */
+        #center-area { display: flex; flex-direction: column; height: 100%; border-left: 1px solid #2b3139; border-right: 1px solid #2b3139; }
+        #ticker-ribbon { background: #161a1e; border-bottom: 1px solid #2b3139; padding: 10px 15px; display: flex; align-items: center; gap: 20px; height: 24px; }
+        #stats-bar { font-family: monospace; font-size: 13px; color: #cfd6df; }
+        #chart-container { flex: 1; width: 100%; position: relative; background: #131722; }
+
+        /* Right Side: Live Market Activity Consumer Ticker Tape */
+        .feed-tape { flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .tick-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #20262d; }
+        .side-buy { color: #0ecb81; }
+        .side-sell { color: #f6465d; }
+        .feed-time { color: #5e6673; margin-left: 6px; }
+    </style>
+</head>
+<body>
+
+    <div id="navbar">
+        <span id="brand">⚡ NEXUS EXCHANGE TERMINAL</span>
+        <div id="connection-status" class="status disconnected">Connecting...</div>
+    </div>
+
+    <div id="auth-overlay">
+        <div class="login-box">
+            <h3 style="color: #f0b90b; margin-top: 0; margin-bottom: 20px;">Secure Trading Connection</h3>
+            <input type="text" id="api-key-input" placeholder="Enter API Access Key...">
+            <button class="ticker-btn" style="width: 100%; padding: 12px; background: #f0b90b; color: #0b0e11;" onclick="connectTerminal()">Initialize Terminal</button>
+        </div>
+    </div>
+
+    <div id="terminal-grid">
+        
+        <div class="panel">
+            <div class="panel-header">Market Selection</div>
+            <div id="ticker-selector">
+                <button class="ticker-btn active" onclick="switchMarket('INFY')">INFY</button>
+                <button class="ticker-btn" onclick="switchMarket('RELIANCE')">RELIANCE</button>
+                <button class="ticker-btn" onclick="switchMarket('TCS')">TCS</button>
+                <button class="ticker-btn" onclick="switchMarket('HDFCBANK')">HDFCBANK</button>
+            </div>
+            <div class="panel-header">Order Entry Deck</div>
+            <div class="order-form">
+                <div class="form-field">
+                    <label>Side</label>
+                    <select id="orderSide">
+                        <option value="BUY">BUY (Long)</option>
+                        <option value="SELL">SELL (Short)</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label>Limit Price (₹)</label>
+                    <input type="number" step="0.01" id="orderPrice" placeholder="0.00">
+                </div>
+                <div class="form-field">
+                    <label>Order Size (Shares)</label>
+                    <input type="number" id="orderQuantity" placeholder="Min 1">
+                </div>
+                <button class="btn-submit" id="submitOrderBtn">Execute Order</button>
+                <div id="orderStatusMsg" style="text-align: center; font-size: 12px; margin-top: 5px; font-weight: 600;"></div>
+            </div>
+        </div>
+
+        <div id="center-area">
+            <div id="ticker-ribbon">
+                <div id="stats-bar">Select ticker...</div>
+            </div>
+            <div id="chart-container"></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">Live Market Trades (All Accounts)</div>
+            <div class="feed-tape" id="feed">
+                <div style="color: #5e6673; text-align: center; margin-top: 200px;" id="placeholder">Awaiting Kafka Stream...</div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let chart, candleSeries, socket;
+        let currentTicker = 'INFY';
+        let activeApiKey = sessionStorage.getItem('apiKey') || '';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (activeApiKey) connectTerminal(activeApiKey);
+            
+            // Wire order execution form event triggers
+            document.getElementById('submitOrderBtn').addEventListener('click', transmitOrder);
+            
+            // Synchronize color changes with Buy/Sell order dropdown selection 
+            document.getElementById('orderSide').addEventListener('change', (e) => {
+                const btn = document.getElementById('submitOrderBtn');
+                if(e.target.value === 'SELL') {
+                    btn.style.backgroundColor = '#f6465d';
+                    btn.innerText = 'Execute Sell Short';
+                } else {
+                    btn.style.backgroundColor = '#0ecb81';
+                    btn.innerText = 'Execute Buy Long';
+                }
+            });
+        });
+
+        function initChartStructure() {
+            const container = document.getElementById('chart-container');
+            chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth,
+                height: container.clientHeight,
+                layout: { background: { type: 'solid', color: '#131722' }, textColor: '#d1d4dc' },
+                grid: { vertLines: { color: '#1f222e' }, horzLines: { color: '#1f222e' } },
+                timeScale: { timeVisible: true, secondsVisible: false }
+            });
+
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#0ecb81', downColor: '#f6465d',
+                borderVisible: false, wickUpColor: '#0ecb81', wickDownColor: '#f6465d'
+            });
+
+            // Clean resize calculation handler prevents responsive layout crashing
+            window.addEventListener('resize', () => {
+                chart.resize(container.clientWidth, container.clientHeight);
+            });
+        }
+
+        function connectTerminal(savedKey) {
+            const key = savedKey || document.getElementById('api-key-input').value.trim();
+            if (!key) return alert('An active API authentication key is required.');
+
+            sessionStorage.setItem('apiKey', key);
+            activeApiKey = key;
+
+            socket = io({ auth: { token: key } });
+
+            socket.on('connect', () => {
+                document.getElementById('auth-overlay').style.display = 'none';
+                const statusDiv = document.getElementById('connection-status');
+                statusDiv.textContent = "🟢 TERMINAL ONLINE";
+                statusDiv.className = "status connected";
+                
+                initChartStructure();
+                loadHistoricalData(currentTicker);
+            });
+
+            socket.on('connect_error', (err) => {
+                sessionStorage.removeItem('apiKey');
+                alert(`Authentication Exception: ${err.message}`);
+            });
+
+            socket.on('disconnect', () => {
+                const statusDiv = document.getElementById('connection-status');
+                statusDiv.textContent = "🔴 SYSTEM OFFLINE";
+                statusDiv.className = "status disconnected";
+            });
+
+            // WebSocket consumers parsing Kafka events
+            socket.on('live-candle-update', (candle) => {
+                if (candle.ticker === currentTicker) {
+                    candleSeries.update({
+                        time: Math.floor(new Date(candle.timestamp).getTime() / 1000),
+                        open: candle.open, high: candle.high, low: candle.low, close: candle.close
+                    });
+                    renderStatsRibbon(candle);
+                }
+            });
+
+            socket.on('live-ticker-update', (trade) => {
+                const placeholder = document.getElementById('placeholder');
+                if (placeholder) placeholder.remove();
+
+                const tape = document.getElementById('feed');
+                const row = document.createElement('div');
+                row.className = 'tick-item';
+
+                const isBuy = trade.side.toUpperCase() === 'BUY';
+                const colorClass = isBuy ? 'side-buy' : 'side-sell';
+                const timeStr = new Date(trade.timestamp).toLocaleTimeString();
+
+                row.innerHTML = `
+                    <div>
+                        <strong style="color: #fff;">${trade.ticker}</strong>
+                        <span class="feed-time">${timeStr}</span>
+                    </div>
+                    <div>
+                        <span class="${colorClass}">${trade.side.toUpperCase()}</span>
+                        <span style="color: #e2e8f0; margin-left: 15px;">${trade.quantity ?? '—'} SHRS</span>
+                        <span style="color: #f0b90b; margin-left: 15px; font-weight:600;">₹${Number(trade.price).toFixed(2)}</span>
+                    </div>
+                `;
+                tape.insertBefore(row, tape.firstChild);
+
+                // Memory-management: limit scrolling rows to prevent performance degradation over time
+                if (tape.children.length > 50) {
+                    tape.removeChild(tape.lastChild);
+                }
+            });
+        }
+
+        async function loadHistoricalData(ticker) {
+            try {
+                const response = await fetch(`/api/candles/${ticker}`);
+                const res = await response.json();
+                if (!res.success) return console.error(res.error);
+
+                const dataPoints = res.data.map(c => ({
+                    time: Math.floor(new Date(c.timestamp).getTime() / 1000),
+                    open: c.open, high: c.high, low: c.low, close: c.close
+                }));
+
+                candleSeries.setData(dataPoints);
+                if (res.data.length > 0) renderStatsRibbon(res.data[res.data.length - 1]);
+            } catch (err) {
+                console.error("Baseline processing fault:", err);
+            }
+        }
+
+        function switchMarket(ticker) {
+            currentTicker = ticker;
+            document.querySelectorAll('.ticker-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.innerText === ticker);
+            });
+            loadHistoricalData(ticker);
+        }
+
+        function renderStatsRibbon(c) {
+            document.getElementById('stats-bar').innerHTML = `
+                <strong style="color: #fff; font-size:14px; margin-right:15px;">${currentTicker}</strong> 
+                O: <span style="color:#fff">${parseFloat(c.open).toFixed(2)}</span> | 
+                H: <span style="color:#0ecb81">${parseFloat(c.high).toFixed(2)}</span> | 
+                L: <span style="color:#f6465d">${parseFloat(c.low).toFixed(2)}</span> | 
+                C: <span style="color:#f0b90b">${parseFloat(c.close).toFixed(2)}</span>
+            `;
+        }
+
+        async function transmitOrder() {
+            const side = document.getElementById('orderSide').value;
+            const price = parseFloat(document.getElementById('orderPrice').value);
+            const quantity = parseInt(document.getElementById('orderQuantity').value);
+            const statusMsg = document.getElementById('orderStatusMsg');
+
+            if(!price || !quantity || quantity <= 0) {
+                statusMsg.style.color = '#f6465d';
+                statusMsg.textContent = "Invalid entry parameters.";
+                return;
+            }
+
+            statusMsg.style.color = '#848e9c';
+            statusMsg.textContent = "Routing to gateway...";
+
+            try {
+                const response = await fetch('/api/orders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': activeApiKey },
+                    body: JSON.stringify({ ticker: currentTicker, price, quantity, side })
+                });
+
+                if (response.ok) {
+                    statusMsg.style.color = '#0ecb81';
+                    statusMsg.textContent = "Order accepted!";
+                    document.getElementById('orderPrice').value = '';
+                    document.getElementById('orderQuantity').value = '';
+                    setTimeout(() => { statusMsg.textContent = ""; }, 2000);
+                } else {
+                    const txt = await response.text();
+                    statusMsg.style.color = '#f6465d';
+                    statusMsg.textContent = `Rejected: ${response.status}`;
+                }
+            } catch (err) {
+                statusMsg.style.color = '#f6465d';
+                statusMsg.textContent = "Routing timeout.";
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Trading Charts</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <style>
+        html, body { height: 100%; margin: 0; overflow: hidden; background-color: #131722; color: #d1d4dc; font-family: sans-serif; }
+        
+        #auth-overlay { position: fixed; inset: 0; background: #0b0e14; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10; }
+        #control-bar { display: flex; align-items: center; gap: 15px; padding: 15px; background: #1c2030; border-bottom: 1px solid #2a2e3f; height: 40px; }
+        .ticker-btn { background: #2a2e3f; color: #fff; border: none; padding: 8px 16px; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        .ticker-btn.active { background: #26a69a; }
+        #stats-bar { font-family: monospace; font-size: 14px; display: flex; gap: 15px; }
+        #chart-container { width: 100vw; height: calc(100% - 120px); }
+        input { padding: 10px; background: #1c2030; border: 1px solid #2a2e3f; color: white; margin-bottom: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div style="background: #1c2030; border-bottom: 1px solid #2a2e3f; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; font-family: sans-serif;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px; font-weight: bold; color: #26a69a; letter-spacing: 0.5px;">⚡ NEXUS EXCHANGE</span>
+        </div>
+        <div style="display: flex; gap: 15px;">
+            <a href="/index.html" style="color: #d1d4dc; text-decoration: none; font-weight: bold; font-size: 14px; padding: 6px 12px; border-radius: 4px; background: #2a2e3f; transition: 0.2s;">📋 Order Desk</a>
+            <a href="/chart.html" style="color: #d1d4dc; text-decoration: none; font-weight: bold; font-size: 14px; padding: 6px 12px; border-radius: 4px; background: #26a69a; transition: 0.2s;">📊 Live Charts</a>
+        </div>
+    </div>
+    <div id="auth-overlay">
+        <h2>Enter API Key to View Charts</h2>
+        <input type="text" id="api-key-input" placeholder="x-api-key...">
+        <button class="ticker-btn" onclick="connectCharts()">Connect</button>
+    </div>
+
+    <div id="control-bar">
+        <button class="ticker-btn active" onclick="switchTicker('INFY')">INFY</button>
+        <button class="ticker-btn" onclick="switchTicker('RELIANCE')">RELIANCE</button>
+        <button class="ticker-btn" onclick="switchTicker('TCS')">TCS</button>
+        <button class="ticker-btn" onclick="switchTicker('HDFCBANK')">HDFCBANK</button>
+        <div id="stats-bar">Select a ticker to load live metrics...</div>
+    </div>
+
+    <div id="chart-container"></div>
+
+    <script>
+        let chart, candleSeries;
+        let currentTicker = 'INFY';
+        let socket;
+
+        // ── SESSION STORAGE: auto-login if key already saved ──────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedKey = sessionStorage.getItem('apiKey');
+            if (savedKey) {
+                // Key exists — skip the overlay and connect straight away
+                connectCharts(savedKey);
+            }
+        });
+
+        function initChart() {
+            const container = document.getElementById('chart-container');
+            chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth,
+                height: container.clientHeight,
+                layout: { 
+                    background: { type: 'solid', color: '#131722' }, 
+                    textColor: '#d1d4dc' 
+                },
+                grid: { vertLines: { color: '#1f222e' }, horzLines: { color: '#1f222e' } },
+                timeScale: { timeVisible: true, secondsVisible: false }
+            });
+
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#26a69a', downColor: '#ef5350',
+                borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+            });
+
+            window.addEventListener('resize', () => {
+                chart.resize(container.clientWidth, window.innerHeight - 120);
+            });
+        }
+
+        // accepts an optional key param so auto-login can pass the saved key directly
+        function connectCharts(savedKey) {
+            const apiKey = savedKey || document.getElementById('api-key-input').value;
+            if (!apiKey) return alert('Key required');
+
+            // Save to sessionStorage — persists across page switches, clears on tab close
+            sessionStorage.setItem('apiKey', apiKey);
+
+            socket = io({ auth: { token: apiKey } });
+
+            socket.on('connect', () => {
+                document.getElementById('auth-overlay').style.display = 'none';
+                initChart();
+                loadHistoricalCandles(currentTicker);
+            });
+
+            socket.on('connect_error', (err) => {
+                // Bad key — clear storage so user sees the prompt again
+                sessionStorage.removeItem('apiKey');
+                alert(`Auth Failed: ${err.message}`);
+            });
+
+            socket.on('live-candle-update', (candleData) => {
+                if (candleData.ticker === currentTicker) {
+                    const formattedCandle = {
+                        time: Math.floor(new Date(candleData.timestamp).getTime() / 1000),
+                        open: candleData.open,
+                        high: candleData.high,
+                        low: candleData.low,
+                        close: candleData.close
+                    };
+                    candleSeries.update(formattedCandle);
+                    updateStatsBar(candleData);
+                }
+            });
+        }
+
+        async function loadHistoricalCandles(ticker) {
+            try {
+                const response = await fetch(`/api/candles/${ticker}`);
+                const result = await response.json();
+
+                if (!result.success) return console.error(result.error);
+
+                const formattedData = result.data.map(candle => ({
+                    time: Math.floor(new Date(candle.timestamp).getTime() / 1000),
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close
+                }));
+
+                candleSeries.setData(formattedData);
+                if (result.data.length > 0) {
+                    updateStatsBar(result.data[result.data.length - 1]);
+                }
+            } catch (err) {
+                console.error("Failed loading data baseline:", err);
+            }
+        }
+
+        function switchTicker(ticker) {
+            currentTicker = ticker;
+            document.querySelectorAll('.ticker-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.innerText === ticker);
+            });
+            loadHistoricalCandles(ticker);
+        }
+
+        function updateStatsBar(c) {
+            document.getElementById('stats-bar').innerText = 
+                `${currentTicker} - O: ${parseFloat(c.open).toFixed(2)} | H: ${parseFloat(c.high).toFixed(2)} | L: ${parseFloat(c.low).toFixed(2)} | C: ${parseFloat(c.close).toFixed(2)}`;
+        }
+    </script>
+</body>
+</html>

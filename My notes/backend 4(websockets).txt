@@ -1,0 +1,12 @@
+npm install socket.io
+
+🔌 Step 3: Wire your Backend to serve the UI & Stream Data
+Now let's modify your server.js file. We will update it to:
+
+Wrap Express in a native Node HTTP server (required by Socket.io).
+
+Tell Express to host that public folder UI automatically.
+
+Call io.emit() inside your Kafka consumer right after it updates MongoDB so it immediately sends the trade details over the socket connection.
+
+Replace your server.js code with this updated blueprint:
