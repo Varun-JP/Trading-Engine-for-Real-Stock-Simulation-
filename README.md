@@ -9,4 +9,4 @@ Available out-of-the-box at the `/metrics` endpoint for easy ingestion into stan
 
 
 
-simulation at https://trading-engine-for-real-stock-simulation.onrender.com/
+simulation at https://trading-engine-for-real-stock-simulation.onrender.com/ with auth key "varun_secret_key"
