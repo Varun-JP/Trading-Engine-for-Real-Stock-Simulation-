@@ -4,13 +4,16 @@ import { HistoricalTrade } from './model.js';
 import connectDB from './db.js';
 import dotenv from 'dotenv';
 
+
 dotenv.config();
 
 // ── KAFKA ─────────────────────────────────────────────────────────────────────
 const kafka = new Kafka({
-    clientId: 'order-engine',
+    clientId: 'api-server',
     brokers: [process.env.KAFKA_BROKERS],
-    ssl: true,
+    ssl: {
+       ca: [process.env.KAFKA_CA_CERT],
+    },
     sasl: {
         mechanism: 'plain',
         username: process.env.KAFKA_USERNAME,

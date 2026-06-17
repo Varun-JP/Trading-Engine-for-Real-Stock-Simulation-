@@ -7,6 +7,7 @@ import { User, Candle } from './model.js';
 import connectDB from './db.js';
 import client from 'prom-client';
 
+
 dotenv.config();
 
 const app    = express();
@@ -58,7 +59,9 @@ app.use(express.static('public'));
 const kafka = new Kafka({
     clientId: 'api-server',
     brokers: [process.env.KAFKA_BROKERS],
-    ssl: true,
+    ssl: {
+        ca: [process.env.KAFKA_CA_CERT],
+    },
     sasl: {
         mechanism: 'plain',
         username: process.env.KAFKA_USERNAME,

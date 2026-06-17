@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import dotenv from'dotenv';
 import { Candle } from './model.js';
 
+
 dotenv.config();
 
 
@@ -10,9 +11,11 @@ dotenv.config();
 //2. KAFKA INITIALIZATION (Belongs to its own distinct consumer group)
 
 const kafka = new Kafka({
-    clientId: 'chart-engine',
+    clientId: 'api-server',
     brokers: [process.env.KAFKA_BROKERS],
-    ssl: true,
+    ssl: {
+        ca: [process.env.KAFKA_CA_CERT],
+    },
     sasl: {
         mechanism: 'plain',
         username: process.env.KAFKA_USERNAME,
