@@ -2,13 +2,14 @@ import { parentPort, workerData } from 'worker_threads';
 import { Kafka } from 'kafkajs';
 import { randomUUID } from 'crypto';
 
-const { workerId, kafkaBrokers, kafkaUsername, kafkaPassword } = workerData;
-
+const { workerId, kafkaBrokers, kafkaUsername, kafkaPassword, kafkaCaCert } = workerData;
 
 const kafka = new Kafka({
     clientId: `bot-worker-${workerId}`,
     brokers:  [kafkaBrokers],
-    ssl: true,
+    ssl: {
+        ca: [kafkaCaCert],
+    },
     sasl: {
         mechanism: 'plain',
         username: kafkaUsername,

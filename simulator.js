@@ -21,6 +21,7 @@ for (let i = 0; i < WORKER_COUNT; i++) {
             kafkaBrokers: process.env.KAFKA_BROKERS,
             kafkaUsername: process.env.KAFKA_USERNAME,
             kafkaPassword: process.env.KAFKA_PASSWORD,
+            kafkaCaCert:  process.env.KAFKA_CA_CERT,
         }
     });
 
