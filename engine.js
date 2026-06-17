@@ -8,8 +8,14 @@ dotenv.config();
 
 // ── KAFKA ─────────────────────────────────────────────────────────────────────
 const kafka = new Kafka({
-    clientId: 'matching-engine',
-    brokers: [process.env.KAFKA_BROKERS || 'localhost:9092']
+    clientId: 'order-engine',
+    brokers: [process.env.KAFKA_BROKERS],
+    ssl: true,
+    sasl: {
+        mechanism: 'plain',
+        username: process.env.KAFKA_USERNAME,
+        password: process.env.KAFKA_PASSWORD,
+    }
 });
 
 // Engine consumes order-requests, publishes to completed-trades AND trade-fills
@@ -18,7 +24,7 @@ const producer  = kafka.producer();
 
 // ── REDIS ─────────────────────────────────────────────────────────────────────
 const redisClient = createClient({
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
+    url: process.env.REDIS_URL 
 });
 
 redisClient.on('error', (err) => console.error('[ENGINE] Redis error:', err));

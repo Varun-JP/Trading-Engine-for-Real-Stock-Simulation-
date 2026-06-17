@@ -10,8 +10,14 @@ dotenv.config();
 //2. KAFKA INITIALIZATION (Belongs to its own distinct consumer group)
 
 const kafka = new Kafka({
-    clientId : 'chart-engine',
-    brokers:[process.env.KAFKA_BROKERS || 'localhost:9092']
+    clientId: 'chart-engine',
+    brokers: [process.env.KAFKA_BROKERS],
+    ssl: true,
+    sasl: {
+        mechanism: 'plain',
+        username: process.env.KAFKA_USERNAME,
+        password: process.env.KAFKA_PASSWORD,
+    }
 });
 
 const consumer = kafka.consumer({groupId : 'charts-group'});
@@ -104,7 +110,7 @@ const processIncomingTrade = async(trade) => {
 const startChartEngine = async()=> {
     try{
         //Connect to MongoDB
-        await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/financial_db'); 
+        await mongoose.connect(process.env.MONGODB_URI ); 
         console.log('MongoDB Connected successfully to Chart Engine Channel.');
 
         //Connect to Kafka

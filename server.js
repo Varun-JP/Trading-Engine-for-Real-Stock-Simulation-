@@ -10,7 +10,7 @@ import client from 'prom-client';
 dotenv.config();
 
 const app    = express();
-const PORT   = 5000;
+const PORT   = process.env.PORT || 5000;
 const server = http.createServer(app);
 
 // ----- SOCKET.IO ---------------------------
@@ -57,7 +57,13 @@ app.use(express.static('public'));
 // ── KAFKA ─────────────────────────────────────────────────────────────────────
 const kafka = new Kafka({
     clientId: 'api-server',
-    brokers: [process.env.KAFKA_BROKERS || 'kafka:9092']
+    brokers: [process.env.KAFKA_BROKERS],
+    ssl: true,
+    sasl: {
+        mechanism: 'plain',
+        username: process.env.KAFKA_USERNAME,
+        password: process.env.KAFKA_PASSWORD,
+    }
 });
 
 const producer       = kafka.producer();

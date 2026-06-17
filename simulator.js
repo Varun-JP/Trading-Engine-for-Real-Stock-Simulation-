@@ -18,7 +18,9 @@ for (let i = 0; i < WORKER_COUNT; i++) {
     const worker = new Worker(path.join(__dirname, 'botWorker.js'), {
         workerData: {
             workerId:     i + 1,
-            kafkaBrokers: process.env.KAFKA_BROKERS || 'localhost:9092',
+            kafkaBrokers: process.env.KAFKA_BROKERS,
+            kafkaUsername: process.env.KAFKA_USERNAME,
+            kafkaPassword: process.env.KAFKA_PASSWORD,
         }
     });
 
@@ -34,3 +36,4 @@ for (let i = 0; i < WORKER_COUNT; i++) {
         if (code !== 0) console.error(`🛑 Worker ${i + 1} exited with code ${code}`);
     });
 }
+
