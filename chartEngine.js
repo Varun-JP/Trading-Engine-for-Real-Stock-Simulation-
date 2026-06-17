@@ -107,6 +107,7 @@ const processIncomingTrade = async(trade) => {
         }
 };
 
+
 const startChartEngine = async()=> {
     try{
         //Connect to MongoDB
