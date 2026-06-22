@@ -37,21 +37,21 @@ const startEngine = async () => {
     try {
         await connectDB();
         await redisClient.connect();
-        console.log('[ENGINE] ✅  Redis connected');
+        console.log('[ENGINE]  Redis connected');
 
         await producer.connect();
         await consumer.connect();
-        console.log('[ENGINE] ✅  Kafka producer + consumer connected');
+        console.log('[ENGINE] Kafka producer + consumer connected');
 
         await consumer.subscribe({ topic: 'order-requests', fromBeginning: true });
-        console.log('[ENGINE] 🚀  Matching engine live — consuming order-requests\n');
+        console.log('[ENGINE]  Matching engine live — consuming order-requests\n');
 
         await consumer.run({
             eachMessage: async ({ message }) => {
                 const incomingOrder = JSON.parse(message.value.toString());
                 const { orderId, userId, ticker, side, price, quantity } = incomingOrder;
 
-                console.log(`\n📦 [ENGINE] ${side} ${ticker} | Qty ${quantity} @ ₹${price}`);
+                console.log(`\n [ENGINE] ${side} ${ticker} | Qty ${quantity} @ ₹${price}`);
 
                 const buyBookKey  = `orders:${ticker}:BUY`;
                 const sellBookKey = `orders:${ticker}:SELL`;
@@ -68,7 +68,7 @@ const startEngine = async () => {
 
                             if (price >= cheapestSellPrice) {
                                 const matchQty = Math.min(remainingQty, cheapestSellOrder.quantity);
-                                console.log(`   ✅  MATCH: ${matchQty} shares of ${ticker} @ ₹${cheapestSellPrice}`);
+                                console.log(`    MATCH: ${matchQty} shares of ${ticker} @ ₹${cheapestSellPrice}`);
 
                                 // 1. Notify chart engine
                                 await producer.send({
@@ -134,7 +134,7 @@ const startEngine = async () => {
 
                             if (price <= highestBuyPrice) {
                                 const matchQty = Math.min(remainingQty, highestBuyOrder.quantity);
-                                console.log(`   ✅  MATCH: ${matchQty} shares of ${ticker} @ ₹${highestBuyPrice}`);
+                                console.log(`    MATCH: ${matchQty} shares of ${ticker} @ ₹${highestBuyPrice}`);
 
                                 await producer.send({
                                     topic: 'completed-trades',
@@ -188,7 +188,7 @@ const startEngine = async () => {
                     }
 
                 } catch (dbError) {
-                    console.error('[ENGINE] ❌  Matching loop fault:', dbError.message);
+                    console.error('[ENGINE]  Matching loop fault:', dbError.message);
                 }
             }
         });

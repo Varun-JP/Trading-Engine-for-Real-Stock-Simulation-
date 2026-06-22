@@ -108,7 +108,7 @@ function enforceCircuitBreaker(ticker, price) {
     if (move >= CIRCUIT_LIMIT_PCT) {
         state.haltUntil = Date.now() + HALT_DURATION_MS;
         const dir = price > state.dailyOpen ? 'UPPER' : 'LOWER';
-        console.warn(`[CIRCUIT] 🚨 ${dir} BREAKER — ${ticker} halted (${(move * 100).toFixed(1)}%)`);
+        console.warn(`[CIRCUIT]  ${dir} BREAKER — ${ticker} halted (${(move * 100).toFixed(1)}%)`);
         circuitBreakerCounter.inc({ticker , side : dir});
         return `Circuit breaker triggered — ${ticker} ${dir} limit breached. Trading halted 10s.`;
     }
@@ -120,12 +120,12 @@ function enforceCircuitBreaker(ticker, price) {
 const startServices = async () => {
     try {
         await connectDB();
-        console.log('[SERVER] ✅  MongoDB connected');
+        console.log('[SERVER]  MongoDB connected');
 
         await producer.connect();
         await fillConsumer.connect();
         await candleConsumer.connect();
-        console.log('[SERVER] ✅  Kafka connected');
+        console.log('[SERVER]  Kafka connected');
 
         // ── Listen for trade fills from engine.js → push to user sockets ──
         await fillConsumer.subscribe({ topic: 'trade-fills', fromBeginning: false });
@@ -157,7 +157,7 @@ const startServices = async () => {
 
         server.listen(PORT, () => {
             
-            console.log(`[SERVER] 🚀  API + UI live on http://localhost:${PORT}`);
+            console.log(`[SERVER]  API + UI live on http://localhost:${PORT}`);
         });
 
     } catch (err) {

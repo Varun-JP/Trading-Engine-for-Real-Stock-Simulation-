@@ -30,11 +30,11 @@ for (let i = 0; i < WORKER_COUNT; i++) {
     });
 
     worker.on('error', (err) => {
-        console.error(`❌ Worker ${i + 1} error:`, err.message);
+        console.error(`Worker ${i + 1} error:`, err.message);
     });
 
     worker.on('exit', (code) => {
-        if (code !== 0) console.error(`🛑 Worker ${i + 1} exited with code ${code}`);
+        if (code !== 0) console.error(` Worker ${i + 1} exited with code ${code}`);
     });
 }
 

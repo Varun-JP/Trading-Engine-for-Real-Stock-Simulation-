@@ -38,7 +38,7 @@ function isHalted(ticker) {
     if (Date.now() < state.haltUntil) return true;
     state.haltUntil = null;
     state.dailyOpen = state.lastPrice;
-    log(`[CIRCUIT] ✅  ${ticker} halt lifted. New open: ₹${state.dailyOpen.toFixed(2)}`);
+    log(`[CIRCUIT]   ${ticker} halt lifted. New open: ₹${state.dailyOpen.toFixed(2)}`);
     return false;
 }
 
@@ -47,7 +47,7 @@ function checkCircuit(ticker, price) {
     const move = Math.abs(price - dailyOpen) / dailyOpen;
     if (move >= CIRCUIT_LIMIT) {
         MARKET_STATE[ticker].haltUntil = Date.now() + HALT_DURATION_MS;
-        const dir = price > dailyOpen ? '🚨 UPPER' : '🚨 LOWER';
+        const dir = price > dailyOpen ? 'UPPER' : 'LOWER';
         log(`[CIRCUIT] ${dir} — ${ticker} halted 10s (${(move * 100).toFixed(1)}% move)`);
         return true;
     }
@@ -202,7 +202,7 @@ async function fireBotOrder(bot) {
         });
         tickCount++;
     } catch (err) {
-        log(`⚠️  Bot ${bot.id} send error: ${err.message}`);
+        log(` Bot ${bot.id} send error: ${err.message}`);
     }
 }
 
@@ -221,7 +221,7 @@ function log(msg) {
 
 async function startSimulation() {
     await producer.connect();
-    log(`✅ Kafka connected — ${BOTS.length} bots across ${TICKERS.length} tickers`);
+    log(` Kafka connected — ${BOTS.length} bots across ${TICKERS.length} tickers`);
 
     for (const bot of BOTS) {
         const interval   = TICK_INTERVALS[bot.personality];
@@ -233,15 +233,15 @@ async function startSimulation() {
 
     // Per-worker snapshot every 15 seconds
     setInterval(() => {
-        log(`📊 Ticks fired: ${tickCount} | Prices: ${
+        log(` Ticks fired: ${tickCount} | Prices: ${
             TICKERS.map(t => `${t} ₹${MARKET_STATE[t].lastPrice.toFixed(0)}`).join(' | ')
         }`);
     }, 15_000);
 
-    log(`🚀 All ${BOTS.length} bots live`);
+    log(` All ${BOTS.length} bots live`);
 }
 
-startSimulation().catch(err => log(`🚨 ${err.message}`));
+startSimulation().catch(err => log(` ${err.message}`));
 
 /*
 kafkaBrokers ? why did it go from kafka to kafka brokers without the url now ? 

@@ -52,7 +52,7 @@ const CandleSchema  = new mongoose.Schema({
 
 CandleSchema.index({ticker : 1 , timestamp : 1 });
 
-const Candle = mongoose .model('Candle ' , CandleSchema);
+const Candle = mongoose .model('Candle' , CandleSchema);
 export { Candle };
 
 

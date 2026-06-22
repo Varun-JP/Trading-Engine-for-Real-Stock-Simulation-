@@ -19,7 +19,7 @@ const connectDB = async () => {
             const userExists = await User.findOne({ username : userData.username });
             if(!userExists ) {
                 const newUser = await User.create(userData);
-                console.log(` Seeded User : ${newUser.username} | ID : ${newUser._id}`);
+                console.log(`Seeded User : ${newUser.username} | ID : ${newUser._id}`);
             }
             else{
                 console.log(`Active User : ${userExists.username} | ID: ${userExists._id}`);
